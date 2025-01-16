@@ -7,6 +7,7 @@ use bitcoin::XOnlyPublicKey;
 use tracing::instrument;
 
 use crate::amount::SplitTarget;
+use crate::cairo_sc::{self, CairoConditions, CairoWitness};
 use crate::dhke::construct_proofs;
 use crate::nuts::nut00::ProofsMethods;
 use crate::nuts::nut10::Kind;
@@ -24,6 +25,7 @@ impl Wallet {
         amount_split_target: SplitTarget,
         p2pk_signing_keys: &[SecretKey],
         preimages: &[String],
+        cairo_proof: Option<String>,
     ) -> Result<Amount, Error> {
         let mint_url = &self.mint_url;
         // Add mint if it does not exist in the store
@@ -74,33 +76,44 @@ impl Wallet {
                     proof.secret.clone(),
                 )
             {
-                let conditions: Result<Conditions, _> =
-                    secret.secret_data.tags.unwrap_or_default().try_into();
-                if let Ok(conditions) = conditions {
-                    let mut pubkeys = conditions.pubkeys.unwrap_or_default();
-
-                    match secret.kind {
-                        Kind::P2PK => {
-                            let data_key = PublicKey::from_str(&secret.secret_data.data)?;
-
-                            pubkeys.push(data_key);
-                        }
-                        Kind::HTLC => {
-                            let hashed_preimage = &secret.secret_data.data;
-                            let preimage = hashed_to_preimage
-                                .get(hashed_preimage)
-                                .ok_or(Error::PreimageNotProvided)?;
-                            proof.add_preimage(preimage.to_string());
-                        }
+                if secret.kind == Kind::Cairo {
+                    if let Some(cairo_proof) = &cairo_proof {
+                        proof.witness = Some(crate::nuts::Witness::Cairo(CairoWitness {
+                            proof: cairo_proof.clone(),
+                        }));
                     }
-                    for pubkey in pubkeys {
-                        if let Some(signing) = p2pk_signing_keys.get(&pubkey.x_only_public_key()) {
-                            proof.sign_p2pk(signing.to_owned().clone())?;
-                        }
-                    }
+                } else {
+                    let conditions: Result<Conditions, _> =
+                        secret.secret_data.tags.unwrap_or_default().try_into();
+                    if let Ok(conditions) = conditions {
+                        let mut pubkeys = conditions.pubkeys.unwrap_or_default();
 
-                    if conditions.sig_flag.eq(&SigFlag::SigAll) {
-                        sig_flag = SigFlag::SigAll;
+                        match secret.kind {
+                            Kind::P2PK => {
+                                let data_key = PublicKey::from_str(&secret.secret_data.data)?;
+
+                                pubkeys.push(data_key);
+                            }
+                            Kind::HTLC => {
+                                let hashed_preimage = &secret.secret_data.data;
+                                let preimage = hashed_to_preimage
+                                    .get(hashed_preimage)
+                                    .ok_or(Error::PreimageNotProvided)?;
+                                proof.add_preimage(preimage.to_string());
+                            }
+                            Kind::Cairo => {}
+                        }
+                        for pubkey in pubkeys {
+                            if let Some(signing) =
+                                p2pk_signing_keys.get(&pubkey.x_only_public_key())
+                            {
+                                proof.sign_p2pk(signing.to_owned().clone())?;
+                            }
+                        }
+
+                        if conditions.sig_flag.eq(&SigFlag::SigAll) {
+                            sig_flag = SigFlag::SigAll;
+                        }
                     }
                 }
             }
@@ -192,6 +205,7 @@ impl Wallet {
         amount_split_target: SplitTarget,
         p2pk_signing_keys: &[SecretKey],
         preimages: &[String],
+        cairo_proof: Option<String>,
     ) -> Result<Amount, Error> {
         let token_data = Token::from_str(encoded_token)?;
 
@@ -211,7 +225,13 @@ impl Wallet {
         }
 
         let amount = self
-            .receive_proofs(proofs, amount_split_target, p2pk_signing_keys, preimages)
+            .receive_proofs(
+                proofs,
+                amount_split_target,
+                p2pk_signing_keys,
+                preimages,
+                cairo_proof,
+            )
             .await?;
 
         Ok(amount)

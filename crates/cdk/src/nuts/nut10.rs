@@ -26,6 +26,7 @@ pub enum Kind {
     P2PK,
     /// NUT-14 HTLC
     HTLC,
+    Cairo,
 }
 
 /// Secert Date

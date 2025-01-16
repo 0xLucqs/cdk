@@ -83,7 +83,7 @@ pub async fn create_request(
                 let token = Token::new(payload.mint, payload.proofs, payload.memo, payload.unit);
 
                 let amount = multi_mint_wallet
-                    .receive(&token.to_string(), &[], &[])
+                    .receive(&token.to_string(), &[], &[], None)
                     .await?;
 
                 println!("Received {}", amount);

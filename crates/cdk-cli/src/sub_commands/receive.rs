@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -32,6 +33,8 @@ pub struct ReceiveSubCommand {
     /// Preimage
     #[arg(short, long,  action = clap::ArgAction::Append)]
     preimage: Vec<String>,
+    #[arg(short, long)]
+    cairo_proof: Option<String>,
 }
 
 pub async fn receive(
@@ -41,6 +44,12 @@ pub async fn receive(
     sub_command_args: &ReceiveSubCommand,
 ) -> Result<()> {
     let mut signing_keys = Vec::new();
+
+    let cairo_proof = sub_command_args
+        .cairo_proof
+        .as_ref()
+        .map(|path| std::fs::read_to_string(path))
+        .transpose()?;
 
     if !sub_command_args.signing_key.is_empty() {
         let mut s_keys: Vec<SecretKey> = sub_command_args
@@ -68,6 +77,7 @@ pub async fn receive(
                 token_str,
                 &signing_keys,
                 &sub_command_args.preimage,
+                cairo_proof,
             )
             .await?
         }
@@ -103,6 +113,7 @@ pub async fn receive(
                     token_str,
                     &signing_keys,
                     &sub_command_args.preimage,
+                    cairo_proof.clone(),
                 )
                 .await
                 {
@@ -134,6 +145,7 @@ async fn receive_token(
     token_str: &str,
     signing_keys: &[SecretKey],
     preimage: &[String],
+    cairo_proof: Option<String>,
 ) -> Result<Amount> {
     let token: Token = Token::from_str(token_str)?;
 
@@ -153,7 +165,7 @@ async fn receive_token(
     }
 
     let amount = multi_mint_wallet
-        .receive(token_str, signing_keys, preimage)
+        .receive(token_str, signing_keys, preimage, cairo_proof)
         .await?;
     Ok(amount)
 }

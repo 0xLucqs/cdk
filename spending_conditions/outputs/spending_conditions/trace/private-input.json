@@ -1,0 +1,74 @@
+{
+  "trace_path": "/Users/tdelabro/Documents/code/starkware/cdk/spending_conditions/outputs/spending_conditions/trace/trace.bin",
+  "memory_path": "/Users/tdelabro/Documents/code/starkware/cdk/spending_conditions/outputs/spending_conditions/trace/memory.bin",
+  "pedersen": [
+    {
+      "index": 0,
+      "x": "0xe367643e9cce5e71cd2ba7d39ae44759",
+      "y": "0x9635cb944acc09e8d82818ba12ee9ad4"
+    }
+  ],
+  "range_check": [
+    {
+      "index": 0,
+      "value": "0xe367643e9cce5e71cd2ba7d39ae44759"
+    },
+    {
+      "index": 1,
+      "value": "0x9635cb944acc09e8d82818ba12ee9ad4"
+    },
+    {
+      "index": 2,
+      "value": "0x3e066573c94177da9f3b33f06988dcf7"
+    },
+    {
+      "index": 3,
+      "value": "0x23aba1fe32726e3af1083fe70b1a66d"
+    },
+    {
+      "index": 4,
+      "value": "0xfe3aba1fe32726db2f1083fe70b1a66c"
+    },
+    {
+      "index": 5,
+      "value": "0xb346e54a26d5d96e167a7e7d6993072b"
+    },
+    {
+      "index": 6,
+      "value": "0x2cf876cd00ce28ab2628769b0b8631b"
+    },
+    {
+      "index": 7,
+      "value": "0xfecf876cd00ce28232628769b0b8631a"
+    }
+  ],
+  "ecdsa": [],
+  "bitwise": [],
+  "ec_op": [
+    {
+      "index": 0,
+      "p_x": "0x6f794601384b7f1fe092d3313464e74c7fb8a151a759f04da3ae3daa87e2bb2",
+      "p_y": "0x644af465db4eb3007be99dc3d5db231615184a1faa36f89b02e4252ba041e83",
+      "m": "0x40c0e473ec460e80c99e56a45e88f30dd7e98c2076dad813cc2ca719cb0de27",
+      "q_x": "0x6315ce603065f423402b2e9f243f929e861f532a19361ad77cf0acea4627fac",
+      "q_y": "0x2cd1b95289b576bac3486f03fc004446de0ba96d16e9f7832628769b0b8631b"
+    },
+    {
+      "index": 1,
+      "p_x": "0x6f794601384b7f1fe092d3313464e74c7fb8a151a759f04da3ae3daa87e2bb2",
+      "p_y": "0x644af465db4eb3007be99dc3d5db231615184a1faa36f89b02e4252ba041e83",
+      "m": "0x3a6b789b168acf99b0e06d03c8c8350aed51dffaf2906c75f187cf5807e62e3",
+      "q_x": "0x1ef15c18599971b7beced415a40f0c7deacfd9b0d1819e03d723d8bc943cfca",
+      "q_y": "0x5668060aa49730b7be4801df46ec62de53ecd11abe43a32873000c36e8dc1f"
+    },
+    {
+      "index": 2,
+      "p_x": "0x6f794601384b7f1fe092d3313464e74c7fb8a151a759f04da3ae3daa87e2bb2",
+      "p_y": "0x644af465db4eb3007be99dc3d5db231615184a1faa36f89b02e4252ba041e83",
+      "m": "0x6315ce603065f423402b2e9f243f929e861f532a19361ad77cf0acea4627fac",
+      "q_x": "0x4e76282c35be857ab38dd07c06ca79fd9eb02280bbc457d207c25374b231711",
+      "q_y": "0xf81995cf2505e179b34b27f0529e3627b1f39b64327d172f1083fe70b1a66d"
+    }
+  ],
+  "poseidon": []
+}

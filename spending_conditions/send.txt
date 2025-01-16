@@ -1,0 +1,2 @@
+0: http://127.0.0.1:8086 999990 sat
+Enter mint number to create token

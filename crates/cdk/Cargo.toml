@@ -43,6 +43,12 @@ futures = { version = "0.3.28", default-features = false, optional = true, featu
 url = "2.3"
 utoipa = { version = "4", optional = true }
 uuid = { version = "1", features = ["v4"] }
+starknet-types-core = "0.1.7"
+stwo_cairo_prover = { git = "https://github.com/starkware-libs/stwo-cairo"}
+stwo-prover = { git = "https://github.com/starkware-libs/stwo",rev = "af5475cb", features = [
+    "parallel",
+], default-features = false}
+starknet-core = "0.12.1"
 
 # -Z minimal-versions
 sync_wrapper = "0.1.2"

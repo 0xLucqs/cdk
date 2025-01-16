@@ -355,6 +355,11 @@ impl Mint {
                 Kind::HTLC => {
                     proof.verify_htlc()?;
                 }
+                Kind::Cairo => {
+                    proof
+                        .verify_cairo()
+                        .map_err(|e| Error::Custom(e.to_string()))?;
+                }
             }
         }
 

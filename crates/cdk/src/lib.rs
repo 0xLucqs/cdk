@@ -4,6 +4,7 @@
 #![warn(rustdoc::bare_urls)]
 
 pub mod amount;
+mod cairo_sc;
 #[cfg(any(feature = "wallet", feature = "mint"))]
 pub mod cdk_database;
 #[cfg(feature = "mint")]
