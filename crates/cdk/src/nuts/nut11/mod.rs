@@ -283,14 +283,22 @@ pub enum SpendingConditions {
         /// Additional Optional Spending [`Conditions`]
         conditions: Option<Conditions>,
     },
+    /// Cairo spending conditions
     Cairo {
         /// Program hash
         data: Felt,
+        /// The additional condition to be verified by the mint
         conditions: Option<CairoConditions>,
     },
 }
 
+// The slicing of the code between the different files is a mess.
+// We are supposed to be in nut11 p2pk and we have nut14 code, + now cairo code.
+// Bad abstraction, bad code design.
+// Maybe it just needs to move things around a little bit.
+
 impl SpendingConditions {
+    /// New Cairo (SpendingConditions)
     pub fn new_cairo(program_hash: Felt, output: Vec<Felt>) -> Result<Self, Error> {
         Ok(Self::Cairo {
             data: program_hash,

@@ -50,6 +50,8 @@ pub struct SendSubCommand {
     #[arg(default_value = "sat")]
     unit: String,
     #[arg(short, long, num_args = 2.., value_delimiter = ' ')]
+    /// Expextations specified by the sender
+    ///
     /// Vec[Program hash, output_len, outputs]
     cairo: Option<Vec<String>>,
 }
@@ -86,6 +88,8 @@ pub async fn send(
         bail!("Not enough funds");
     }
 
+    // We short circuit the regular cashu flow
+    // It's a bit arbitrary but it works for the needs of the demo
     let mut conditions = if let Some(cairo_inputs) = &sub_command_args.cairo {
         let program_hash = Felt::from_str(&cairo_inputs[0])?;
         let output_len = cairo_inputs
@@ -103,6 +107,9 @@ pub async fn send(
         None
     };
 
+    // Here is the normal code for pay-to-public-key and other spending conditions
+    // It is skipped if we already have a cairo spending condition
+    // TODO: either make them exclusive to each other, or just get rid of the others altogether.
     if conditions.is_none() {
         conditions = match &sub_command_args.preimage {
             Some(preimage) => {

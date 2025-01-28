@@ -7,7 +7,7 @@ use bitcoin::XOnlyPublicKey;
 use tracing::instrument;
 
 use crate::amount::SplitTarget;
-use crate::cairo_sc::{self, CairoConditions, CairoWitness};
+use crate::cairo_sc::CairoWitness;
 use crate::dhke::construct_proofs;
 use crate::nuts::nut00::ProofsMethods;
 use crate::nuts::nut10::Kind;
@@ -76,6 +76,10 @@ impl Wallet {
                     proof.secret.clone(),
                 )
             {
+                // I short circuit the regular flow in case of cairo spending condition
+                // Also it is weird imo that we have to check for both secret.kind and cairo_proof.is_some
+                // the first being a direct consequence of the second.
+                // Probably something can be optimized here
                 if secret.kind == Kind::Cairo {
                     if let Some(cairo_proof) = &cairo_proof {
                         proof.witness = Some(crate::nuts::Witness::Cairo(CairoWitness {
@@ -101,7 +105,7 @@ impl Wallet {
                                     .ok_or(Error::PreimageNotProvided)?;
                                 proof.add_preimage(preimage.to_string());
                             }
-                            Kind::Cairo => {}
+                            Kind::Cairo => unreachable!(),
                         }
                         for pubkey in pubkeys {
                             if let Some(signing) =

@@ -233,6 +233,7 @@ impl MultiMintWallet {
         encoded_token: &str,
         p2pk_signing_keys: &[SecretKey],
         preimages: &[String],
+        // A serialized .json STWO proof
         cairo_proof: Option<String>,
     ) -> Result<Amount, Error> {
         let token_data = Token::from_str(encoded_token)?;

@@ -12,6 +12,8 @@ struct Cli {
     nonce: String,
 }
 
+/// Take a cashu nonce as argument and print it as two u128,
+/// followed by the r and s parts of the signature over the pedersen hash of those parts
 fn main() {
     let cli = Cli::parse();
 
@@ -23,6 +25,6 @@ fn main() {
     let nonce_hash = starknet_crypto::pedersen_hash(&low.into(), &high.into());
 
     let signature = signer.sign(&nonce_hash).unwrap();
-    println!("r, s, nonce low, nonce high");
-    println!("{} {} {} {}", signature.r, signature.s, low, high);
+    println!("nonce low, nonce high, r, s");
+    println!("{} {} {} {}", low, high, signature.r, signature.s);
 }

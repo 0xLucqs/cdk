@@ -1,5 +1,8 @@
 //! Serde utils for Cairo Witness
 
+// I have no idea why I wrote that. I believe it was implemented for the otheres types of witness
+// so I did it too, but it doesn't looks like it is ever used.
+
 use serde::{de, ser, Deserialize, Deserializer, Serializer};
 
 use super::CairoWitness;

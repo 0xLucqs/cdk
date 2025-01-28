@@ -205,7 +205,12 @@ impl Witness {
                     sigs
                 });
             }
-            _ => {}
+            _ => {
+                // Do nothing. This method only exists because all the previous forms of spending conditions involved signatures
+                // It is not the case for cairo proofs. I would say that this is an abstractions that doesn't match the needs anymore,
+                // and will have to be removed, or re abstracted somewhere else.
+                // Same for `signatures` and `preimage` below
+            }
         }
     }
 
