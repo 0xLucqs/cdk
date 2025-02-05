@@ -8,6 +8,7 @@ use bitcoin::secp256k1::{self, Secp256k1};
 use cdk_common::common::LnKey;
 use cdk_common::database::{self, MintDatabase};
 use cdk_common::mint::MintKeySetInfo;
+use cdk_common::secret::Secret;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use subscription::PubSubManager;
@@ -502,6 +503,36 @@ impl Mint {
 
         Ok(total_redeemed)
     }
+
+    pub async fn proof_of_liabilities(&self) -> Result<Vec<ProofOfLiability>, Error> {
+        let mut keysets = self.localstore.get_keyset_infos().await?;
+        keysets.sort_by_key(|mint_key_set_info| mint_key_set_info.valid_from);
+        let mut pols = Vec::with_capacity(keysets.len());
+        for keyset_info in keysets {
+            pols.push(ProofOfLiability {
+                mints: self
+                    .localstore
+                    .get_blind_signatures_for_keyset(&keyset_info.id)
+                    .await?,
+                melts: self
+                    .localstore
+                    .get_proofs_by_keyset_id(&keyset_info.id)
+                    .await?
+                    .0
+                    .into_iter()
+                    .map(|proof| proof.secret)
+                    .collect(),
+            });
+        }
+        Ok(pols)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "swagger", derive(utoipa::ToSchema))]
+pub struct ProofOfLiability {
+    mints: Vec<BlindSignature>,
+    melts: Vec<Secret>,
 }
 
 /// Mint Fee Reserve

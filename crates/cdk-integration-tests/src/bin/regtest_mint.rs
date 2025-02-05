@@ -157,6 +157,7 @@ async fn main() -> Result<()> {
 
     match mint_db_kind.as_str() {
         "MEMORY" => {
+            println!("\n\n\n\nPLEASE NOTICE ME\n\n\n\n");
             tokio::spawn(async move {
                 create_mint(
                     mint_addr,
