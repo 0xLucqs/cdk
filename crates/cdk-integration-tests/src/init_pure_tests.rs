@@ -8,7 +8,7 @@ use bip39::Mnemonic;
 use cdk::amount::SplitTarget;
 use cdk::cdk_database::mint_memory::MintMemoryDatabase;
 use cdk::cdk_database::{MintDatabase, WalletMemoryDatabase};
-use cdk::mint::{FeeReserve, MintBuilder, MintMeltLimits};
+use cdk::mint::{FeeReserve, MintBuilder, MintMeltLimits, ProofOfLiability};
 use cdk::nuts::nut00::ProofsMethods;
 use cdk::nuts::{
     CheckStateRequest, CheckStateResponse, CurrencyUnit, Id, KeySet, KeysetResponse,
@@ -140,6 +140,9 @@ impl MintConnector for DirectMintConnection {
 
     async fn post_restore(&self, request: RestoreRequest) -> Result<RestoreResponse, Error> {
         self.mint.restore(request).await
+    }
+    async fn get_proof_of_liabilities(&self) -> Result<Vec<ProofOfLiability>, Error> {
+        self.mint.proof_of_liabilities().await
     }
 }
 

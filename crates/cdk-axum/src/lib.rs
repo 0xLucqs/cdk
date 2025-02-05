@@ -123,7 +123,8 @@ pub struct MintState {
         post_melt_bolt11,
         post_swap,
         post_check,
-        post_restore
+        post_restore,
+        get_proof_of_liabilities
     )
 )]
 /// OpenAPI spec for the mint's v1 APIs
@@ -165,7 +166,8 @@ pub async fn create_mint_router_with_custom_cache(
         .route("/melt/bolt11", post(cache_post_melt_bolt11))
         .route("/checkstate", post(post_check))
         .route("/info", get(get_mint_info))
-        .route("/restore", post(post_restore));
+        .route("/restore", post(post_restore))
+        .route("/proof_of_liabilites", get(get_proof_of_liabilities));
 
     let mint_router = Router::new().nest("/v1", v1_router).with_state(state);
 
