@@ -8,6 +8,7 @@ use bitcoin::secp256k1::{self, Secp256k1};
 use cdk_common::common::LnKey;
 use cdk_common::database::{self, MintDatabase};
 use cdk_common::mint::MintKeySetInfo;
+use cdk_common::secret::Secret;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use subscription::PubSubManager;
@@ -48,6 +49,7 @@ pub struct Mint {
     secp_ctx: Secp256k1<secp256k1::All>,
     xpriv: Xpriv,
     keysets: Arc<RwLock<HashMap<Id, MintKeySet>>>,
+    custom_paths: HashMap<CurrencyUnit, DerivationPath>,
 }
 
 impl Mint {
@@ -104,6 +106,7 @@ impl Mint {
                     } else if &highest_index_keyset.input_fee_ppk == input_fee_ppk
                         && &highest_index_keyset.max_order == max_order
                     {
+                        tracing::debug!("Current highest index keyset matches expect fee and max order. Setting active");
                         let id = highest_index_keyset.id;
                         let keyset = MintKeySet::generate_from_xpriv(
                             &secp_ctx,
@@ -116,6 +119,7 @@ impl Mint {
                         let mut keyset_info = highest_index_keyset;
                         keyset_info.active = true;
                         localstore.add_keyset_info(keyset_info).await?;
+                        active_keyset_units.push(unit.clone());
                         localstore.set_active_keyset(unit, id).await?;
                         continue;
                     } else {
@@ -182,6 +186,7 @@ impl Mint {
             localstore,
             ln,
             keysets,
+            custom_paths,
         })
     }
 
@@ -498,6 +503,36 @@ impl Mint {
 
         Ok(total_redeemed)
     }
+
+    pub async fn proof_of_liabilities(&self) -> Result<Vec<ProofOfLiability>, Error> {
+        let mut keysets = self.localstore.get_keyset_infos().await?;
+        keysets.sort_by_key(|mint_key_set_info| mint_key_set_info.valid_from);
+        let mut pols = Vec::with_capacity(keysets.len());
+        for keyset_info in keysets {
+            pols.push(ProofOfLiability {
+                mints: self
+                    .localstore
+                    .get_blind_signatures_for_keyset(&keyset_info.id)
+                    .await?,
+                melts: self
+                    .localstore
+                    .get_proofs_by_keyset_id(&keyset_info.id)
+                    .await?
+                    .0
+                    .into_iter()
+                    .map(|proof| proof.secret)
+                    .collect(),
+            });
+        }
+        Ok(pols)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "swagger", derive(utoipa::ToSchema))]
+pub struct ProofOfLiability {
+    mints: Vec<BlindSignature>,
+    melts: Vec<Secret>,
 }
 
 /// Mint Fee Reserve
@@ -743,7 +778,7 @@ mod tests {
         assert!(keysets.keysets.is_empty());
 
         // generate the first keyset and set it to active
-        mint.rotate_keyset(CurrencyUnit::default(), 0, 1, 1, HashMap::new())
+        mint.rotate_keyset(CurrencyUnit::default(), 0, 1, 1, &HashMap::new())
             .await?;
 
         let keysets = mint.keysets().await.unwrap();
@@ -752,7 +787,7 @@ mod tests {
         let first_keyset_id = keysets.keysets[0].id;
 
         // set the first keyset to inactive and generate a new keyset
-        mint.rotate_keyset(CurrencyUnit::default(), 1, 1, 1, HashMap::new())
+        mint.rotate_keyset(CurrencyUnit::default(), 1, 1, 1, &HashMap::new())
             .await?;
 
         let keysets = mint.keysets().await.unwrap();
@@ -784,7 +819,7 @@ mod tests {
         };
         let mint = create_mint(config).await?;
 
-        mint.rotate_keyset(CurrencyUnit::default(), 0, 32, 1, HashMap::new())
+        mint.rotate_keyset(CurrencyUnit::default(), 0, 32, 1, &HashMap::new())
             .await?;
 
         let keys = mint.keysets.read().await.clone();

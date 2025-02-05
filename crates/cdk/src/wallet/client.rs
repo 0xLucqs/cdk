@@ -12,6 +12,7 @@ use url::Url;
 
 use super::Error;
 use crate::error::ErrorResponse;
+use crate::mint::ProofOfLiability;
 use crate::mint_url::MintUrl;
 use crate::nuts::{
     CheckStateRequest, CheckStateResponse, Id, KeySet, KeysResponse, KeysetResponse,
@@ -251,6 +252,12 @@ impl MintConnector for HttpClient {
         let url = self.mint_url.join_paths(&["v1", "restore"])?;
         self.http_post(url, &request).await
     }
+    /// Restore request [NUT-13]
+    #[instrument(skip(self), fields(mint_url = %self.mint_url))]
+    async fn get_proof_of_liabilities(&self) -> Result<Vec<ProofOfLiability>, Error> {
+        let url = self.mint_url.join_paths(&["v1", "proof_of_liabilities"])?;
+        self.http_get(url).await
+    }
 }
 
 /// Interface that connects a wallet to a mint. Typically represents an [HttpClient].
@@ -305,4 +312,6 @@ pub trait MintConnector: Debug {
     ) -> Result<CheckStateResponse, Error>;
     /// Restore request [NUT-13]
     async fn post_restore(&self, request: RestoreRequest) -> Result<RestoreResponse, Error>;
+    /// Proof of liability for all epochs of this mint
+    async fn get_proof_of_liabilities(&self) -> Result<Vec<ProofOfLiability>, Error>;
 }

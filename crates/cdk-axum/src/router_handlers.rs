@@ -4,6 +4,7 @@ use axum::extract::{Json, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use cdk::error::ErrorResponse;
+use cdk::mint::ProofOfLiability;
 use cdk::nuts::{
     CheckStateRequest, CheckStateResponse, Id, KeysResponse, KeysetResponse, MeltBolt11Request,
     MeltQuoteBolt11Request, MeltQuoteBolt11Response, MintBolt11Request, MintBolt11Response,
@@ -407,6 +408,26 @@ pub async fn post_restore(
     })?;
 
     Ok(Json(restore_response))
+}
+#[cfg_attr(feature = "swagger", utoipa::path(
+    get,
+    context_path = "/v1",
+    path = "/proof_of_liabilities",
+    responses(
+        (status = 200, description = "Successful response", body = Vec<ProofOfLiability>)
+    )
+))]
+
+/// Proof of liabilities for all epochs
+pub async fn get_proof_of_liabilities(
+    State(state): State<MintState>,
+) -> Result<Json<Vec<ProofOfLiability>>, Response> {
+    Ok(Json(state.mint.proof_of_liabilities().await.map_err(
+        |err| {
+            tracing::error!("Could not get proof of liabilities: {}", err);
+            into_response(err)
+        },
+    )?))
 }
 
 pub fn into_response<T>(error: T) -> Response
