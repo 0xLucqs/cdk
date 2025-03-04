@@ -31,6 +31,7 @@ use cdk_mintd::cli::CLIArgs;
 use cdk_mintd::config::{self, DatabaseEngine, LnBackend};
 use cdk_mintd::env_vars::ENV_WORK_DIR;
 use cdk_mintd::setup::LnBackendSetup;
+use cdk_redb::mint::mssmt::RedbStore;
 use cdk_redb::MintRedbDatabase;
 use cdk_sqlite::mssmt::SqliteStore;
 use cdk_sqlite::MintSqliteDatabase;
@@ -109,11 +110,11 @@ async fn main() -> anyhow::Result<()> {
         };
     let tree_store = match settings.database.engine {
         DatabaseEngine::Sqlite => {
-            ArcTreeStore::new(SqliteStore::new(&work_dir.join("cdk-mintd.sqlite")).await?)
+            ArcTreeStore::new(SqliteStore::new(&work_dir.join("cdk-tree-mintd.sqlite")).await?)
         }
 
         DatabaseEngine::Redb => {
-            panic!("Not implemented")
+            ArcTreeStore::new(RedbStore::new(&work_dir.join("cdk-tree-mintd.redb"))?)
         }
     };
     mint_builder = mint_builder.with_localstore(localstore);
