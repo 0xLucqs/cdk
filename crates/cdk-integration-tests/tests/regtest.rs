@@ -156,6 +156,11 @@ async fn test_regtest_mint_melt_round_trip() -> Result<()> {
     assert_eq!(payload.amount + payload.fee_reserve, 50.into());
     assert_eq!(payload.quote.to_string(), melt.id);
     assert_eq!(payload.state, MeltQuoteState::Paid);
+    // Terrible test but that's something
+    assert_eq!(
+        wallet.get_proof_of_liabilities().await.unwrap().unwrap(),
+        wallet.get_proof_of_liabilities().await.unwrap().unwrap()
+    );
 
     Ok(())
 }

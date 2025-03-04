@@ -19,6 +19,9 @@ wallet = []
 async-trait = "0.1"
 cdk-common = { path = "../cdk-common", version = "0.7.1" }
 bitcoin = { version = "0.32.2", default-features = false }
+merkle-sum-sparse-tree = { path = "/Users/lucas/merkle-sum-sparse-tree", features = ["multi-thread"] }
+sha2 = "0.10.8"
+serde = {version = "1", features = ["derive"] }
 sqlx = { version = "0.6.3", default-features = false, features = [
     "runtime-tokio-rustls",
     "sqlite",
@@ -35,3 +38,6 @@ tracing = { version = "0.1", default-features = false, features = [
 serde_json = "1"
 lightning-invoice = { version = "0.32.0", features = ["serde", "std"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3.10.1"

@@ -3,6 +3,7 @@
 #![warn(missing_docs)]
 #![warn(rustdoc::bare_urls)]
 
+use core::panic;
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
@@ -22,7 +23,7 @@ use cdk::mint::{MintBuilder, MintMeltLimits};
 use cdk::nuts::nut17::SupportedMethods;
 use cdk::nuts::nut19::{CachedEndpoint, Method as NUT19Method, Path as NUT19Path};
 use cdk::nuts::{ContactInfo, CurrencyUnit, MintVersion, PaymentMethod};
-use cdk::types::{LnKey, QuoteTTL};
+use cdk::types::{ArcTreeStore, LnKey, QuoteTTL};
 use cdk_axum::cache::HttpCache;
 #[cfg(feature = "management-rpc")]
 use cdk_mint_rpc::MintRPCServer;
@@ -31,6 +32,7 @@ use cdk_mintd::config::{self, DatabaseEngine, LnBackend};
 use cdk_mintd::env_vars::ENV_WORK_DIR;
 use cdk_mintd::setup::LnBackendSetup;
 use cdk_redb::MintRedbDatabase;
+use cdk_sqlite::mssmt::SqliteStore;
 use cdk_sqlite::MintSqliteDatabase;
 use clap::Parser;
 use tokio::sync::Notify;
@@ -105,8 +107,17 @@ async fn main() -> anyhow::Result<()> {
                 Arc::new(MintRedbDatabase::new(&redb_path)?)
             }
         };
+    let tree_store = match settings.database.engine {
+        DatabaseEngine::Sqlite => {
+            ArcTreeStore::new(SqliteStore::new(&work_dir.join("cdk-mintd.sqlite")).await?)
+        }
 
+        DatabaseEngine::Redb => {
+            panic!("Not implemented")
+        }
+    };
     mint_builder = mint_builder.with_localstore(localstore);
+    mint_builder = mint_builder.with_tree_store(tree_store);
 
     let mut contact_info: Option<Vec<ContactInfo>> = None;
 

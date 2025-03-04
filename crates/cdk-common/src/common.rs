@@ -1,6 +1,12 @@
 //! Types
 
+use std::sync::Arc;
+
+use merkle_sum_sparse_tree::node::{Branch, CompactLeaf, Leaf, Node};
+use merkle_sum_sparse_tree::tree::Db;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use tokio::sync::Mutex;
 
 use crate::error::Error;
 use crate::mint_url::MintUrl;
@@ -170,6 +176,72 @@ impl QuoteTTL {
     /// Create new [`QuoteTTL`]
     pub fn new(mint_ttl: u64, melt_ttl: u64) -> QuoteTTL {
         Self { mint_ttl, melt_ttl }
+    }
+}
+
+#[derive(Clone)]
+pub struct ArcTreeStore(Arc<Mutex<dyn NamespaceableTreeStore>>);
+
+impl ArcTreeStore {
+    pub fn new(db: impl NamespaceableTreeStore) -> Self {
+        Self(Arc::new(Mutex::new(db)))
+    }
+}
+pub trait NamespaceableTreeStore: Db<32, Sha256> + Send + Sync + 'static {
+    fn set_namespace(&mut self, namespace: &str);
+    fn get_leaf(&self, key: &[u8; 32]) -> Option<Leaf<32, Sha256>>;
+}
+impl NamespaceableTreeStore for ArcTreeStore {
+    fn set_namespace(&mut self, namespace: &str) {
+        tokio::task::block_in_place(|| {
+            self.0.blocking_lock().set_namespace(namespace);
+        })
+    }
+
+    fn get_leaf(&self, key: &[u8; 32]) -> Option<Leaf<32, Sha256>> {
+        tokio::task::block_in_place(|| self.0.blocking_lock().get_leaf(key))
+    }
+}
+
+impl Db<32, Sha256> for ArcTreeStore {
+    fn get_root_node(&self) -> Option<Branch<32, Sha256>> {
+        tokio::task::block_in_place(|| self.0.blocking_lock().get_root_node())
+    }
+
+    fn get_children(&self, height: usize, key: [u8; 32]) -> (Node<32, Sha256>, Node<32, Sha256>) {
+        tokio::task::block_in_place(|| self.0.blocking_lock().get_children(height, key))
+    }
+
+    fn insert_leaf(&mut self, leaf: Leaf<32, Sha256>) {
+        tokio::task::block_in_place(|| self.0.blocking_lock().insert_leaf(leaf))
+    }
+
+    fn insert_branch(&mut self, branch: Branch<32, Sha256>) {
+        tokio::task::block_in_place(|| self.0.blocking_lock().insert_branch(branch))
+    }
+
+    fn insert_compact_leaf(&mut self, compact_leaf: CompactLeaf<32, Sha256>) {
+        tokio::task::block_in_place(|| self.0.blocking_lock().insert_compact_leaf(compact_leaf))
+    }
+
+    fn empty_tree(&self) -> Arc<[Node<32, Sha256>; 257]> {
+        tokio::task::block_in_place(|| self.0.blocking_lock().empty_tree())
+    }
+
+    fn update_root(&mut self, root: Branch<32, Sha256>) {
+        tokio::task::block_in_place(|| self.0.blocking_lock().update_root(root))
+    }
+
+    fn delete_branch(&mut self, key: &[u8; 32]) {
+        tokio::task::block_in_place(|| self.0.blocking_lock().delete_branch(key))
+    }
+
+    fn delete_leaf(&mut self, key: &[u8; 32]) {
+        tokio::task::block_in_place(|| self.0.blocking_lock().delete_leaf(key))
+    }
+
+    fn delete_compact_leaf(&mut self, key: &[u8; 32]) {
+        tokio::task::block_in_place(|| self.0.blocking_lock().delete_compact_leaf(key))
     }
 }
 

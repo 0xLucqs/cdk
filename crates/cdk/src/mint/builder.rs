@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use bitcoin::bip32::DerivationPath;
+use cdk_common::common::ArcTreeStore;
 use cdk_common::database::{self, MintDatabase};
 
 use super::nut17::SupportedMethods;
@@ -26,6 +27,8 @@ pub struct MintBuilder {
     pub mint_info: MintInfo,
     /// Mint Storage backend
     localstore: Option<Arc<dyn MintDatabase<Err = database::Error> + Send + Sync>>,
+    /// Tree Storage backend
+    tree_store: Option<ArcTreeStore>,
     /// Ln backends for mint
     ln: Option<HashMap<LnKey, Arc<dyn MintLightning<Err = cdk_lightning::Error> + Send + Sync>>>,
     seed: Option<Vec<u8>>,
@@ -59,6 +62,12 @@ impl MintBuilder {
         localstore: Arc<dyn MintDatabase<Err = database::Error> + Send + Sync>,
     ) -> MintBuilder {
         self.localstore = Some(localstore);
+        self
+    }
+
+    /// Set tree store
+    pub fn with_tree_store(mut self, tree_store: ArcTreeStore) -> Self {
+        self.tree_store = Some(tree_store);
         self
     }
 
@@ -224,9 +233,15 @@ impl MintBuilder {
             .clone()
             .ok_or(anyhow!("Localstore not set"))?;
 
+        let tree_store = self
+            .tree_store
+            .clone()
+            .ok_or(anyhow!("Tree store not set"))?;
+
         Ok(Mint::new(
             self.seed.as_ref().ok_or(anyhow!("Mint seed not set"))?,
             localstore,
+            tree_store,
             self.ln.clone().ok_or(anyhow!("Ln backends not set"))?,
             self.supported_units.clone(),
             self.custom_paths.clone(),
