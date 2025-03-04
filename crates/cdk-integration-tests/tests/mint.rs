@@ -180,13 +180,13 @@ async fn test_mint_double_spend() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_proof_of_liabilities() -> Result<()> {
-    let mint = initialize().await;
+    let mint = new_mint(0).await;
     let keys = mint.pubkeys().await?.keysets.first().unwrap().clone().keys;
     let keyset_id = Id::from(&keys);
 
     // Mint some tokens to create blind signatures
     let _sigs =
-        mint_blinded_signatures(mint, 100.into(), &SplitTarget::default(), keys.clone()).await?;
+        mint_blinded_signatures(&mint, 100.into(), &SplitTarget::default(), keys.clone()).await?;
 
     // Get proof of liabilities before any melts
     let pols = mint.proof_of_liabilities().await?;
@@ -203,7 +203,7 @@ async fn test_proof_of_liabilities() -> Result<()> {
     ); // No melts yet
 
     // Now create some proofs and melt them
-    let proofs = mint_proofs(mint, 100.into(), &SplitTarget::default(), keys).await?;
+    let proofs = mint_proofs(&mint, 100.into(), &SplitTarget::default(), keys).await?;
     let preswap = PreMintSecrets::random(keyset_id, 100.into(), &SplitTarget::default())?;
     let swap_request = SwapRequest::new(proofs, preswap.blinded_messages());
     mint.process_swap_request(swap_request).await?;
