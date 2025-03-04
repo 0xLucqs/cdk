@@ -4,11 +4,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cdk_common::common::QuoteTTL;
+use cdk_common::common::{NamespaceableTreeStore, QuoteTTL};
 use cdk_common::database::{Error, MintDatabase};
 use cdk_common::mint::MintKeySetInfo;
 use cdk_common::nut00::ProofsMethods;
 use cdk_common::MintInfo;
+use merkle_sum_sparse_tree::node::{Branch, CompactLeaf, Leaf, Node};
+use merkle_sum_sparse_tree::tree::{Db, EmptyTree};
+use sha2::Sha256;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
@@ -489,5 +492,112 @@ impl MintDatabase for MintMemoryDatabase {
         let quote_ttl = self.quote_ttl.read().await;
 
         Ok(*quote_ttl)
+    }
+}
+
+/// Memory Tree Store. This struct can hold multiple trees separated by a namespace.
+#[derive(Debug, Clone)]
+pub struct MemoryTreeStore {
+    namespace: String,
+    branches: HashMap<(String, [u8; 32]), Branch<32, Sha256>>,
+    leaves: HashMap<(String, [u8; 32]), Leaf<32, Sha256>>,
+    compact_leaves: HashMap<(String, [u8; 32]), CompactLeaf<32, Sha256>>,
+    empty_tree: Arc<[Node<32, Sha256>; 257]>,
+    root_node: HashMap<String, Branch<32, Sha256>>,
+}
+impl Default for MemoryTreeStore {
+    fn default() -> Self {
+        Self::new("".to_string())
+    }
+}
+impl MemoryTreeStore {
+    /// Create new [`MemoryTreeStore`]
+    pub fn new(namespace: String) -> Self {
+        Self {
+            namespace,
+            branches: HashMap::new(),
+            leaves: HashMap::new(),
+            compact_leaves: HashMap::new(),
+            empty_tree: EmptyTree::<32, Sha256>::empty_tree(),
+            root_node: HashMap::new(),
+        }
+    }
+}
+
+impl NamespaceableTreeStore for MemoryTreeStore {
+    fn set_namespace(&mut self, namespace: &str) {
+        self.namespace = namespace.to_string();
+    }
+    fn get_leaf(&self, key: &[u8; 32]) -> Option<Leaf<32, Sha256>> {
+        self.leaves.get(&(self.namespace.clone(), *key)).cloned()
+    }
+}
+
+impl Db<32, Sha256> for MemoryTreeStore {
+    fn get_root_node(&self) -> Option<Branch<32, Sha256>> {
+        self.root_node.get(&self.namespace).cloned()
+    }
+
+    fn get_children(&self, height: usize, key: [u8; 32]) -> (Node<32, Sha256>, Node<32, Sha256>) {
+        let get_node = |height: usize, key: [u8; 32]| {
+            if key == self.empty_tree()[height].hash() {
+                self.empty_tree()[height].clone()
+            } else if let Some(node) = self.branches.get(&(self.namespace.clone(), key)) {
+                Node::Branch(node.clone())
+            } else if let Some(leaf) = self.leaves.get(&(self.namespace.clone(), key)) {
+                Node::Leaf(leaf.clone())
+            } else if let Some(compact) = self.compact_leaves.get(&(self.namespace.clone(), key)) {
+                Node::Compact(compact.clone())
+            } else {
+                self.empty_tree()[height].clone()
+            }
+        };
+        let node = get_node(height, key);
+        if key != self.empty_tree()[height].hash()
+            && node.hash() == self.empty_tree()[height].hash()
+        {
+            panic!("node not found")
+        }
+        if let Node::Branch(branch) = node {
+            (
+                get_node(height + 1, branch.left().hash()),
+                get_node(height + 1, branch.right().hash()),
+            )
+        } else {
+            panic!("Should be a branch node")
+        }
+    }
+
+    fn insert_branch(&mut self, branch: Branch<32, Sha256>) {
+        self.branches
+            .insert((self.namespace.clone(), branch.hash()), branch);
+    }
+    fn insert_leaf(&mut self, leaf: Leaf<32, Sha256>) {
+        self.leaves
+            .insert((self.namespace.clone(), leaf.hash()), leaf);
+    }
+    fn insert_compact_leaf(&mut self, compact_leaf: CompactLeaf<32, Sha256>) {
+        self.compact_leaves
+            .insert((self.namespace.clone(), compact_leaf.hash()), compact_leaf);
+    }
+
+    fn update_root(&mut self, root: Branch<32, Sha256>) {
+        self.root_node.insert(self.namespace.clone(), root);
+    }
+
+    fn delete_branch(&mut self, key: &[u8; 32]) {
+        self.branches.remove(&(self.namespace.clone(), *key));
+    }
+
+    fn delete_leaf(&mut self, key: &[u8; 32]) {
+        self.leaves.remove(&(self.namespace.clone(), *key));
+    }
+
+    fn delete_compact_leaf(&mut self, key: &[u8; 32]) {
+        self.compact_leaves.remove(&(self.namespace.clone(), *key));
+    }
+
+    fn empty_tree(&self) -> Arc<[Node<32, Sha256>; 257]> {
+        self.empty_tree.clone()
     }
 }

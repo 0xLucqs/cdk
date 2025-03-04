@@ -5,12 +5,14 @@ use std::sync::Arc;
 
 use bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv};
 use bitcoin::secp256k1::{self, Secp256k1};
-use cdk_common::common::{LnKey, QuoteTTL};
+use cdk_common::common::{ArcTreeStore, LnKey, NamespaceableTreeStore, QuoteTTL};
 use cdk_common::database::{self, MintDatabase};
 use cdk_common::mint::MintKeySetInfo;
-use cdk_common::secret::Secret;
 use futures::StreamExt;
+use merkle_sum_sparse_tree::compact_tree::CompactMSSMT;
+use merkle_sum_sparse_tree::node::{Hasher, Leaf};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use subscription::PubSubManager;
 use tokio::sync::{Notify, RwLock};
 use tokio::task::JoinSet;
@@ -48,6 +50,8 @@ pub struct Mint {
     pub ln: HashMap<LnKey, Arc<dyn MintLightning<Err = cdk_lightning::Error> + Send + Sync>>,
     /// Subscription manager
     pub pubsub_manager: Arc<PubSubManager>,
+    /// Tree store
+    pub tree_store: ArcTreeStore,
     secp_ctx: Secp256k1<secp256k1::All>,
     xpriv: Xpriv,
     keysets: Arc<RwLock<HashMap<Id, MintKeySet>>>,
@@ -60,6 +64,7 @@ impl Mint {
     pub async fn new(
         seed: &[u8],
         localstore: Arc<dyn MintDatabase<Err = database::Error> + Send + Sync>,
+        tree_store: ArcTreeStore,
         ln: HashMap<LnKey, Arc<dyn MintLightning<Err = cdk_lightning::Error> + Send + Sync>>,
         // Hashmap where the key is the unit and value is (input fee ppk, max_order)
         supported_units: HashMap<CurrencyUnit, (u64, u8)>,
@@ -111,6 +116,7 @@ impl Mint {
             secp_ctx,
             xpriv,
             localstore,
+            tree_store,
             ln,
             keysets,
             custom_paths,
@@ -445,35 +451,111 @@ impl Mint {
         Ok(total_redeemed)
     }
 
+    /// Get proof of liabilities for all keys
+    #[instrument(skip_all)]
     pub async fn proof_of_liabilities(&self) -> Result<Vec<ProofOfLiability>, Error> {
+        use std::time::Instant;
+        let fn_now = Instant::now();
         let mut keysets = self.localstore.get_keyset_infos().await?;
         keysets.sort_by_key(|mint_key_set_info| mint_key_set_info.valid_from);
         let mut pols = Vec::with_capacity(keysets.len());
+        let mut tree_store = self.tree_store.clone();
+
         for keyset_info in keysets {
+            tree_store.set_namespace(&format!("mint_{}", keyset_info.id));
+            let mint_tree = ProofOfLiability::get_mint_tree(
+                &self.localstore,
+                self.tree_store.clone(),
+                keyset_info.id,
+            )
+            .await;
+            tree_store.set_namespace(&format!("melt_{}", keyset_info.id));
+            let melt_tree = ProofOfLiability::get_melt_tree(
+                &self.localstore,
+                self.tree_store.clone(),
+                keyset_info.id,
+            )
+            .await;
+
             pols.push(ProofOfLiability {
-                mints: self
-                    .localstore
-                    .get_blind_signatures_for_keyset(&keyset_info.id)
-                    .await?,
-                melts: self
-                    .localstore
-                    .get_proofs_by_keyset_id(&keyset_info.id)
-                    .await?
-                    .0
-                    .into_iter()
-                    .map(|proof| proof.secret)
-                    .collect(),
+                mint_tree_root: mint_tree.root().hash(),
+                melt_tree_root: melt_tree.root().hash(),
             });
         }
+        let elapsed = fn_now.elapsed();
+        println!("FN Elapsed: {:.2?}", elapsed);
+
         Ok(pols)
     }
 }
 
+/// Contains all the mints and burns
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "swagger", derive(utoipa::ToSchema))]
 pub struct ProofOfLiability {
-    mints: Vec<BlindSignature>,
-    melts: Vec<Secret>,
+    /// Mint tree merkle root
+    pub mint_tree_root: [u8; 32],
+    /// Melt tree merkle root
+    pub melt_tree_root: [u8; 32],
+}
+
+impl ProofOfLiability {
+    async fn get_mint_tree(
+        localstore: &Arc<impl MintDatabase<Err = database::Error> + ?Sized>,
+        db: ArcTreeStore,
+        keyset_id: Id,
+    ) -> CompactMSSMT<32, Sha256> {
+        let mut mint_tree = CompactMSSMT::<32, Sha256>::new(Box::new(db.clone()));
+        let mints = localstore
+            .get_blind_signatures_for_keyset(&keyset_id)
+            .await
+            .unwrap();
+        for sig in mints {
+            let (key, leaf) = Self::blind_signature_to_leaf(&sig);
+            if db.get_leaf(&leaf.hash()).is_none() {
+                mint_tree.insert(key, leaf);
+            }
+        }
+        mint_tree
+    }
+
+    async fn get_melt_tree(
+        localstore: &Arc<impl MintDatabase<Err = database::Error> + ?Sized>,
+        db: ArcTreeStore,
+        keyset_id: Id,
+    ) -> CompactMSSMT<32, Sha256> {
+        let mut melt_tree = CompactMSSMT::<32, Sha256>::new(Box::new(db.clone()));
+        let melts = localstore
+            .get_proofs_by_keyset_id(&keyset_id)
+            .await
+            .unwrap()
+            .0;
+        for proof in melts {
+            let (key, leaf) = Self::secret_to_leaf(&proof);
+            if db.get_leaf(&leaf.hash()).is_none() {
+                melt_tree.insert(key, leaf);
+            }
+        }
+        melt_tree
+    }
+
+    // Keep the helper functions for creating leaves
+    fn blind_signature_to_leaf(sig: &BlindSignature) -> ([u8; 32], Leaf<32, Sha256>) {
+        let key = <Sha256 as Hasher<32>>::hash(sig.c.to_bytes().as_slice());
+
+        let value = sig.c.to_bytes();
+        let sum = u64::from(sig.amount);
+
+        (key, Leaf::new(value.to_vec(), sum))
+    }
+
+    fn secret_to_leaf(proof: &Proof) -> ([u8; 32], Leaf<32, Sha256>) {
+        let key = <Sha256 as Hasher<32>>::hash(proof.secret.as_bytes());
+
+        let value = proof.secret.to_bytes();
+
+        (key, Leaf::new(value, proof.amount.into()))
+    }
 }
 
 /// Mint Fee Reserve
@@ -539,7 +621,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::cdk_database::mint_memory::MintMemoryDatabase;
+    use crate::cdk_database::mint_memory::{MemoryTreeStore, MintMemoryDatabase};
 
     #[test]
     fn mint_mod_generate_keyset_from_seed() {
@@ -664,9 +746,12 @@ mod tests {
             .unwrap(),
         );
 
+        let tree_store = ArcTreeStore::new(MemoryTreeStore::default());
+
         Mint::new(
             config.seed,
             localstore,
+            tree_store,
             HashMap::new(),
             config.supported_units,
             HashMap::new(),

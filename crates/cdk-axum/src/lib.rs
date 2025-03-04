@@ -20,6 +20,7 @@ mod ws;
 mod swagger_imports {
     pub use cdk::amount::Amount;
     pub use cdk::error::{ErrorCode, ErrorResponse};
+    pub use cdk::mint::ProofOfLiability;
     pub use cdk::nuts::nut00::{
         BlindSignature, BlindedMessage, CurrencyUnit, PaymentMethod, Proof, Witness,
     };
@@ -95,6 +96,7 @@ pub struct MintState {
         PaymentMethod,
         Proof,
         ProofDleq,
+        ProofOfLiability,
         ProofState,
         PublicKey,
         RestoreRequest,
@@ -167,7 +169,7 @@ pub async fn create_mint_router_with_custom_cache(
         .route("/checkstate", post(post_check))
         .route("/info", get(get_mint_info))
         .route("/restore", post(post_restore))
-        .route("/proof_of_liabilites", get(get_proof_of_liabilities));
+        .route("/proof_of_liabilities", get(get_proof_of_liabilities));
 
     let mint_router = Router::new().nest("/v1", v1_router).with_state(state);
 

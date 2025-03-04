@@ -5,6 +5,7 @@
 
 #[cfg(feature = "mint")]
 pub mod mint;
+pub mod mssmt;
 #[cfg(feature = "wallet")]
 pub mod wallet;
 

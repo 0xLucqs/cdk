@@ -6,8 +6,9 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use bip39::Mnemonic;
+use cashu::BlindSignature;
 use cdk::amount::{Amount, SplitTarget};
-use cdk::cdk_database::mint_memory::MintMemoryDatabase;
+use cdk::cdk_database::mint_memory::{MemoryTreeStore, MintMemoryDatabase};
 use cdk::cdk_database::MintDatabase;
 use cdk::dhke::construct_proofs;
 use cdk::mint::{FeeReserve, MintBuilder, MintMeltLimits, MintQuote};
@@ -17,10 +18,12 @@ use cdk::nuts::{
     PreMintSecrets, ProofState, Proofs, SecretKey, SpendingConditions, State, SwapRequest,
 };
 use cdk::subscription::{IndexableParams, Params};
-use cdk::types::QuoteTTL;
+use cdk::types::{ArcTreeStore, QuoteTTL};
 use cdk::util::unix_time;
 use cdk::Mint;
 use cdk_fake_wallet::FakeWallet;
+use merkle_sum_sparse_tree::tree::EmptyTree;
+use sha2::Sha256;
 use tokio::sync::OnceCell;
 use tokio::time::sleep;
 
@@ -54,6 +57,7 @@ async fn new_mint(fee: u64) -> Mint {
     Mint::new(
         &mnemonic.to_seed_normalized(""),
         Arc::new(localstore),
+        ArcTreeStore::new(MemoryTreeStore::default()),
         HashMap::new(),
         supported_units,
         HashMap::new(),
@@ -107,6 +111,40 @@ async fn mint_proofs(
 
     Ok(proofs)
 }
+async fn mint_blinded_signatures(
+    mint: &Mint,
+    amount: Amount,
+    split_target: &SplitTarget,
+    keys: cdk::nuts::Keys,
+) -> Result<Vec<BlindSignature>> {
+    let request_lookup = uuid::Uuid::new_v4().to_string();
+
+    let quote = MintQuote::new(
+        "".to_string(),
+        CurrencyUnit::Sat,
+        amount,
+        unix_time() + 36000,
+        request_lookup.to_string(),
+        None,
+    );
+
+    mint.localstore.add_mint_quote(quote.clone()).await?;
+
+    mint.pay_mint_quote_for_request_id(&request_lookup).await?;
+    let keyset_id = Id::from(&keys);
+
+    let premint = PreMintSecrets::random(keyset_id, amount, split_target)?;
+
+    let mint_request = MintBolt11Request {
+        quote: quote.id,
+        outputs: premint.blinded_messages(),
+        signature: None,
+    };
+
+    let after_mint = mint.process_mint_request(mint_request).await?;
+
+    Ok(after_mint.signatures)
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_mint_double_spend() -> Result<()> {
@@ -136,6 +174,44 @@ async fn test_mint_double_spend() -> Result<()> {
             _ => bail!("Wrong error returned"),
         },
     }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_proof_of_liabilities() -> Result<()> {
+    let mint = initialize().await;
+    let keys = mint.pubkeys().await?.keysets.first().unwrap().clone().keys;
+    let keyset_id = Id::from(&keys);
+
+    // Mint some tokens to create blind signatures
+    let _sigs =
+        mint_blinded_signatures(mint, 100.into(), &SplitTarget::default(), keys.clone()).await?;
+
+    // Get proof of liabilities before any melts
+    let pols = mint.proof_of_liabilities().await?;
+
+    // Verify we have the expected number of PoLs
+    assert_eq!(1, pols.len());
+
+    // Verify merkle trees were created
+    let pol = &pols[0];
+
+    assert_eq!(
+        pol.melt_tree_root,
+        EmptyTree::<32, Sha256>::empty_tree()[0].hash()
+    ); // No melts yet
+
+    // Now create some proofs and melt them
+    let proofs = mint_proofs(mint, 100.into(), &SplitTarget::default(), keys).await?;
+    let preswap = PreMintSecrets::random(keyset_id, 100.into(), &SplitTarget::default())?;
+    let swap_request = SwapRequest::new(proofs, preswap.blinded_messages());
+    mint.process_swap_request(swap_request).await?;
+
+    // Get proof of liabilities after melts
+    let pols_after = mint.proof_of_liabilities().await?;
+    let _pol_after = &pols_after[0]; // make sure there's at least one PoL
+                                     // Useless test but still something
 
     Ok(())
 }
@@ -451,13 +527,14 @@ async fn test_correct_keyset() -> Result<()> {
     };
 
     let database = MintMemoryDatabase::default();
+    let tree_store = ArcTreeStore::new(MemoryTreeStore::default());
 
     let fake_wallet = FakeWallet::new(fee_reserve, HashMap::default(), HashSet::default(), 0);
 
     let mut mint_builder = MintBuilder::new();
     let localstore = Arc::new(database);
     mint_builder = mint_builder.with_localstore(localstore.clone());
-
+    mint_builder = mint_builder.with_tree_store(tree_store);
     mint_builder = mint_builder.add_ln_backend(
         CurrencyUnit::Sat,
         PaymentMethod::Bolt11,

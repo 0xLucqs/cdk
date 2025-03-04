@@ -19,6 +19,7 @@ use crate::amount::SplitTarget;
 use crate::dhke::construct_proofs;
 use crate::error::Error;
 use crate::fees::calculate_fee;
+use crate::mint::ProofOfLiability;
 use crate::mint_url::MintUrl;
 use crate::nuts::nut00::token::Token;
 use crate::nuts::nut17::Kind;
@@ -584,5 +585,20 @@ impl Wallet {
         }
 
         Ok(())
+    }
+    /// Query mint for current mint information
+    #[instrument(skip(self))]
+    pub async fn get_proof_of_liabilities(&self) -> Result<Option<Vec<ProofOfLiability>>, Error> {
+        let pol = match self.client.get_proof_of_liabilities().await {
+            Ok(pol) => Some(pol),
+            Err(err) => {
+                tracing::warn!("Could not get proof of liabilities {}", err);
+                None
+            }
+        };
+
+        tracing::trace!("Proof of liabilities for {}", self.mint_url);
+
+        Ok(pol)
     }
 }

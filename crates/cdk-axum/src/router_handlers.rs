@@ -409,6 +409,7 @@ pub async fn post_restore(
 
     Ok(Json(restore_response))
 }
+
 #[cfg_attr(feature = "swagger", utoipa::path(
     get,
     context_path = "/v1",
@@ -417,7 +418,6 @@ pub async fn post_restore(
         (status = 200, description = "Successful response", body = Vec<ProofOfLiability>)
     )
 ))]
-
 /// Proof of liabilities for all epochs
 pub async fn get_proof_of_liabilities(
     State(state): State<MintState>,

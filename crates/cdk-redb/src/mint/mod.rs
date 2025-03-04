@@ -25,6 +25,7 @@ use crate::migrations::migrate_00_to_01;
 use crate::mint::migrations::{migrate_02_to_03, migrate_03_to_04};
 
 mod migrations;
+pub mod mssmt;
 
 const ACTIVE_KEYSETS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("active_keysets");
 const KEYSETS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("keysets");
