@@ -1,10 +1,11 @@
 //! Redb storage backend for Merkle Sum Sparse Tree
+use std::any::Any;
 use std::path::Path;
 use std::sync::Arc;
 
 use cdk_common::common::NamespaceableTreeStore;
-use merkle_sum_sparse_tree::node::{Branch, CompactLeaf, Leaf, Node};
-use merkle_sum_sparse_tree::tree::{Db, EmptyTree};
+use cdk_common::database;
+use mssmt::{Branch, CompactLeaf, Db, EmptyTree, Leaf, Node, TreeError};
 use redb::{Database, TableDefinition};
 use sha2::Sha256;
 
@@ -144,6 +145,7 @@ impl NamespaceableTreeStore for RedbStore {
 }
 
 impl Db<32, Sha256> for RedbStore {
+    type DbError = database::Error;
     fn get_root_node(&self) -> Option<Branch<32, Sha256>> {
         let read_txn = self.db.begin_read().ok()?;
         let table = read_txn.open_table(ROOTS_TABLE).ok()?;
@@ -154,7 +156,11 @@ impl Db<32, Sha256> for RedbStore {
         self.get_branch(&root_hash)
     }
 
-    fn get_children(&self, height: usize, key: [u8; 32]) -> (Node<32, Sha256>, Node<32, Sha256>) {
+    fn get_children(
+        &self,
+        height: usize,
+        key: [u8; 32],
+    ) -> Result<(Node<32, Sha256>, Node<32, Sha256>), TreeError<Self::DbError>> {
         let get_node = |height: usize, key: [u8; 32]| {
             if key == self.empty_tree()[height].hash() {
                 self.empty_tree()[height].clone()
@@ -172,100 +178,199 @@ impl Db<32, Sha256> for RedbStore {
         if key != self.empty_tree()[height].hash()
             && node.hash() == self.empty_tree()[height].hash()
         {
-            panic!("node not found")
+            return Err(TreeError::NodeNotFound);
         }
 
         if let Node::Branch(branch) = node {
             let left = get_node(height + 1, branch.left().hash());
             let right = get_node(height + 1, branch.right().hash());
-            (left, right)
+            Ok((left, right))
         } else {
-            panic!("Should be a branch node")
+            Err(TreeError::ExpectedBranch)
         }
     }
 
-    fn insert_leaf(&mut self, leaf: Leaf<32, Sha256>) {
-        let write_txn = self.db.begin_write().unwrap();
+    fn insert_leaf(&mut self, leaf: Leaf<32, Sha256>) -> Result<(), TreeError<Self::DbError>> {
+        let write_txn = self
+            .db
+            .begin_write()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
         {
-            let mut table = write_txn.open_table(LEAVES_TABLE).unwrap();
+            let mut table = write_txn
+                .open_table(LEAVES_TABLE)
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
             let red_key = [self.namespace.as_bytes(), leaf.hash().as_ref()].concat();
             let data = Self::serialize_leaf(&leaf);
-            table.insert(red_key.as_slice(), data.as_slice()).unwrap();
+            table
+                .insert(red_key.as_slice(), data.as_slice())
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
         }
-        write_txn.commit().unwrap()
+        write_txn
+            .commit()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))
     }
 
-    fn insert_branch(&mut self, branch: Branch<32, Sha256>) {
-        let write_txn = self.db.begin_write().unwrap();
+    fn insert_branch(
+        &mut self,
+        branch: Branch<32, Sha256>,
+    ) -> Result<(), TreeError<Self::DbError>> {
+        let write_txn = self
+            .db
+            .begin_write()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
         {
-            let mut table = write_txn.open_table(BRANCHES_TABLE).unwrap();
+            let mut table = write_txn
+                .open_table(BRANCHES_TABLE)
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
             let red_key = [self.namespace.as_bytes(), branch.hash().as_ref()].concat();
             let data = Self::serialize_branch(&branch);
-            table.insert(red_key.as_slice(), data.as_slice()).unwrap();
+            table
+                .insert(red_key.as_slice(), data.as_slice())
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
         }
-        write_txn.commit().unwrap();
+        write_txn
+            .commit()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))
     }
 
-    fn insert_compact_leaf(&mut self, compact_leaf: CompactLeaf<32, Sha256>) {
-        let write_txn = self.db.begin_write().unwrap();
+    fn insert_compact_leaf(
+        &mut self,
+        compact_leaf: CompactLeaf<32, Sha256>,
+    ) -> Result<(), TreeError<Self::DbError>> {
+        let write_txn = self
+            .db
+            .begin_write()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
         {
-            let mut table = write_txn.open_table(COMPACT_LEAVES_TABLE).unwrap();
+            let mut table = write_txn
+                .open_table(COMPACT_LEAVES_TABLE)
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
             let red_key = [self.namespace.as_bytes(), compact_leaf.hash().as_ref()].concat();
             let data = Self::serialize_compact_leaf(&compact_leaf);
-            table.insert(red_key.as_slice(), data.as_slice()).unwrap();
+            table
+                .insert(red_key.as_slice(), data.as_slice())
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
         }
-        write_txn.commit().unwrap();
+        write_txn
+            .commit()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))
     }
 
     fn empty_tree(&self) -> Arc<[Node<32, Sha256>; TREE_SIZE]> {
         Arc::clone(&self.empty_tree)
     }
 
-    fn update_root(&mut self, root: Branch<32, Sha256>) {
-        let write_txn = self.db.begin_write().unwrap();
+    fn update_root(&mut self, root: Branch<32, Sha256>) -> Result<(), TreeError<Self::DbError>> {
+        let write_txn = self
+            .db
+            .begin_write()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
         {
-            let mut table = write_txn.open_table(ROOTS_TABLE).unwrap();
+            let mut table = write_txn
+                .open_table(ROOTS_TABLE)
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
             table
                 .insert(self.namespace.as_bytes(), root.hash().as_slice())
-                .unwrap();
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
         }
-        write_txn.commit().unwrap();
+        write_txn
+            .commit()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))
     }
 
-    fn delete_branch(&mut self, key: &[u8; 32]) {
-        let write_txn = self.db.begin_write().unwrap();
+    fn delete_branch(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
+        let write_txn = self
+            .db
+            .begin_write()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
         {
-            let mut table = write_txn.open_table(BRANCHES_TABLE).unwrap();
+            let mut table = write_txn
+                .open_table(BRANCHES_TABLE)
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
             let red_key = [self.namespace.as_bytes(), key].concat();
-            table.remove(red_key.as_slice()).unwrap();
+            table
+                .remove(red_key.as_slice())
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
         }
-        write_txn.commit().unwrap();
+        write_txn
+            .commit()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))
     }
 
-    fn delete_leaf(&mut self, key: &[u8; 32]) {
-        let write_txn = self.db.begin_write().unwrap();
+    fn delete_leaf(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
+        let write_txn = self
+            .db
+            .begin_write()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
         {
-            let mut table = write_txn.open_table(LEAVES_TABLE).unwrap();
+            let mut table = write_txn
+                .open_table(LEAVES_TABLE)
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
             let red_key = [self.namespace.as_bytes(), key].concat();
-            table.remove(red_key.as_slice()).unwrap();
+            table
+                .remove(red_key.as_slice())
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
         }
-        write_txn.commit().unwrap();
+        write_txn
+            .commit()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))
     }
 
-    fn delete_compact_leaf(&mut self, key: &[u8; 32]) {
-        let write_txn = self.db.begin_write().unwrap();
+    fn delete_compact_leaf(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
+        let write_txn = self
+            .db
+            .begin_write()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
         {
-            let mut table = write_txn.open_table(COMPACT_LEAVES_TABLE).unwrap();
+            let mut table = write_txn
+                .open_table(COMPACT_LEAVES_TABLE)
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
             let red_key = [self.namespace.as_bytes(), key].concat();
-            table.remove(red_key.as_slice()).unwrap();
+            table
+                .remove(red_key.as_slice())
+                .map_err(Error::from)
+                .map_err(database::Error::from)
+                .map_err(TreeError::DbError)?;
         }
-        write_txn.commit().unwrap();
+        write_txn
+            .commit()
+            .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use merkle_sum_sparse_tree::compact_tree::CompactMSSMT;
+    use mssmt::CompactMSSMT;
     use tempfile::NamedTempFile;
 
     use super::*;
@@ -321,15 +426,15 @@ mod tests {
                 2,
             ),
         ];
-        let mut tree = CompactMSSMT::<32, Sha256>::new(Box::new(store.clone()));
+        let mut tree = CompactMSSMT::<32, Sha256, database::Error>::new(Box::new(store.clone()));
         let mut sum = 0;
         for leaf in leaves.clone() {
             sum += leaf.sum();
-            tree.insert(leaf.hash(), leaf);
+            tree.insert(leaf.hash(), leaf).unwrap();
         }
-        assert_eq!(tree.root().sum(), sum);
+        assert_eq!(tree.root().unwrap().sum(), sum);
         assert_eq!(
-            tree.root().hash(),
+            tree.root().unwrap().hash(),
             [
                 44, 224, 253, 196, 179, 87, 196, 249, 225, 141, 243, 110, 68, 145, 166, 129, 2,
                 132, 149, 250, 107, 131, 119, 148, 10, 55, 45, 126, 72, 35, 212, 3

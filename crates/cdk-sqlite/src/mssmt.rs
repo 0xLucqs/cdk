@@ -1,12 +1,13 @@
 //! SQLite storage backend for Merkle Sum Sparse Tree
+use std::any::Any;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use cdk_common::common::NamespaceableTreeStore;
-use merkle_sum_sparse_tree::node::{Branch, CompactLeaf, ComputedNode, Leaf, Node};
-use merkle_sum_sparse_tree::tree::{Db, EmptyTree};
+use cdk_common::database;
+use mssmt::{Branch, CompactLeaf, ComputedNode, Db, EmptyTree, Leaf, Node, TreeError};
 use sha2::Sha256;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row as SqliteRow, SqlitePool};
@@ -144,6 +145,7 @@ impl NamespaceableTreeStore for SqliteStore {
 }
 
 impl Db<32, Sha256> for SqliteStore {
+    type DbError = database::Error;
     fn get_root_node(&self) -> Option<Branch<32, Sha256>> {
         let row = tokio::task::block_in_place(|| Handle::current().block_on(sqlx::query(
             r#"
@@ -167,7 +169,11 @@ impl Db<32, Sha256> for SqliteStore {
         }
     }
 
-    fn get_children(&self, height: usize, key: [u8; 32]) -> (Node<32, Sha256>, Node<32, Sha256>) {
+    fn get_children(
+        &self,
+        height: usize,
+        key: [u8; 32],
+    ) -> Result<(Node<32, Sha256>, Node<32, Sha256>), TreeError<Self::DbError>> {
         let rows = tokio::task::block_in_place(|| {
             Handle::current().block_on(
                 sqlx::query(
@@ -199,13 +205,13 @@ WHERE depth < 3;
                 .fetch_all(&self.pool),
             )
         })
-        .unwrap_or_default();
+        .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
 
         let mut left = self.empty_tree[height + 1].clone();
         let mut right = self.empty_tree[height + 1].clone();
 
         if rows.is_empty() {
-            return (left, right);
+            return Ok((left, right));
         }
 
         // Get the root node's child hashes
@@ -256,10 +262,10 @@ WHERE depth < 3;
                 right = node;
             }
         }
-        (left, right)
+        Ok((left, right))
     }
 
-    fn insert_leaf(&mut self, leaf: Leaf<32, Sha256>) {
+    fn insert_leaf(&mut self, leaf: Leaf<32, Sha256>) -> Result<(), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| {
             Handle::current().block_on(
                 sqlx::query(
@@ -276,10 +282,14 @@ WHERE depth < 3;
                 .execute(&self.pool),
             )
         })
-        .expect("Failed to insert leaf");
+        .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
+        Ok(())
     }
 
-    fn insert_branch(&mut self, branch: Branch<32, Sha256>) {
+    fn insert_branch(
+        &mut self,
+        branch: Branch<32, Sha256>,
+    ) -> Result<(), TreeError<Self::DbError>> {
         let (left, right) = branch.children();
 
         tokio::task::block_in_place(|| {
@@ -299,10 +309,14 @@ WHERE depth < 3;
                 .execute(&self.pool),
             )
         })
-        .expect("Failed to insert branch");
+        .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
+        Ok(())
     }
 
-    fn insert_compact_leaf(&mut self, compact_leaf: CompactLeaf<32, Sha256>) {
+    fn insert_compact_leaf(
+        &mut self,
+        compact_leaf: CompactLeaf<32, Sha256>,
+    ) -> Result<(), TreeError<Self::DbError>> {
         let leaf = compact_leaf.leaf();
 
         tokio::task::block_in_place(|| {
@@ -322,17 +336,18 @@ WHERE depth < 3;
                 .execute(&self.pool),
             )
         })
-        .expect("Failed to insert compact leaf");
+        .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
+        Ok(())
     }
 
-    fn empty_tree(&self) -> Arc<[Node<32, Sha256>; TREE_SIZE]> {
+    fn empty_tree(&self) -> Arc<[Node<32, Sha256>; 257]> {
         Arc::clone(&self.empty_tree)
     }
 
-    fn update_root(&mut self, root: Branch<32, Sha256>) {
+    fn update_root(&mut self, root: Branch<32, Sha256>) -> Result<(), TreeError<Self::DbError>> {
         // Skip empty root updates
         if root.hash() == self.empty_tree()[0].hash() {
-            return;
+            return Ok(());
         }
 
         tokio::task::block_in_place(|| {
@@ -352,10 +367,11 @@ WHERE depth < 3;
                 .execute(&self.pool),
             )
         })
-        .expect("Failed to update root");
+        .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
+        Ok(())
     }
 
-    fn delete_branch(&mut self, key: &[u8; 32]) {
+    fn delete_branch(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| {
             Handle::current().block_on(
                 sqlx::query("DELETE FROM mssmt_nodes WHERE hash_key = ? AND namespace = ?")
@@ -364,10 +380,11 @@ WHERE depth < 3;
                     .execute(&self.pool),
             )
         })
-        .expect("Failed to delete branch");
+        .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
+        Ok(())
     }
 
-    fn delete_leaf(&mut self, key: &[u8; 32]) {
+    fn delete_leaf(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| {
             Handle::current().block_on(
                 sqlx::query("DELETE FROM mssmt_nodes WHERE hash_key = ? AND namespace = ?")
@@ -376,10 +393,11 @@ WHERE depth < 3;
                     .execute(&self.pool),
             )
         })
-        .expect("Failed to delete leaf");
+        .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
+        Ok(())
     }
 
-    fn delete_compact_leaf(&mut self, key: &[u8; 32]) {
+    fn delete_compact_leaf(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| {
             Handle::current().block_on(
                 sqlx::query("DELETE FROM mssmt_nodes WHERE hash_key = ? AND namespace = ?")
@@ -388,13 +406,18 @@ WHERE depth < 3;
                     .execute(&self.pool),
             )
         })
-        .expect("Failed to delete compact leaf");
+        .map_err(|e| TreeError::DbError(database::Error::from(Error::from(e))))?;
+        Ok(())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use merkle_sum_sparse_tree::compact_tree::CompactMSSMT;
+    use mssmt::CompactMSSMT;
 
     use super::*;
 
@@ -449,15 +472,15 @@ mod tests {
                 2,
             ),
         ];
-        let mut tree = CompactMSSMT::<32, Sha256>::new(Box::new(store.clone()));
+        let mut tree = CompactMSSMT::<32, Sha256, database::Error>::new(Box::new(store.clone()));
         let mut sum = 0;
         for leaf in leaves.clone() {
             sum += leaf.sum();
-            tree.insert(leaf.hash(), leaf);
+            tree.insert(leaf.hash(), leaf).unwrap();
         }
-        assert_eq!(tree.root().sum(), sum);
+        assert_eq!(tree.root().unwrap().sum(), sum);
         assert_eq!(
-            tree.root().hash(),
+            tree.root().unwrap().hash(),
             [
                 44, 224, 253, 196, 179, 87, 196, 249, 225, 141, 243, 110, 68, 145, 166, 129, 2,
                 132, 149, 250, 107, 131, 119, 148, 10, 55, 45, 126, 72, 35, 212, 3

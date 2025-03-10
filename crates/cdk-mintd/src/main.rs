@@ -3,7 +3,6 @@
 #![warn(missing_docs)]
 #![warn(rustdoc::bare_urls)]
 
-use core::panic;
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;

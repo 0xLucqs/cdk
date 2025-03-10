@@ -11,7 +11,7 @@ use crate::nuts::Id;
 use crate::util::hex;
 #[cfg(feature = "wallet")]
 use crate::wallet::WalletKey;
-use crate::Amount;
+use crate::{database, Amount};
 
 /// CDK Error
 #[derive(Debug, Error)]
@@ -210,6 +210,9 @@ pub enum Error {
     /// Http transport error
     #[error("Http transport error: {0}")]
     HttpError(String),
+    /// MSSMT error
+    #[error(transparent)]
+    MSSMTError(#[from] mssmt::TreeError<database::Error>),
 
     // Crate error conversions
     /// Cashu Url Error

@@ -1,16 +1,16 @@
 //! Mint in memory database
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use cdk_common::common::{NamespaceableTreeStore, QuoteTTL};
-use cdk_common::database::{Error, MintDatabase};
+use cdk_common::database::{self, Error, MintDatabase};
 use cdk_common::mint::MintKeySetInfo;
 use cdk_common::nut00::ProofsMethods;
 use cdk_common::MintInfo;
-use merkle_sum_sparse_tree::node::{Branch, CompactLeaf, Leaf, Node};
-use merkle_sum_sparse_tree::tree::{Db, EmptyTree};
+use mssmt::{Branch, CompactLeaf, Db, EmptyTree, Leaf, Node, TreeError};
 use sha2::Sha256;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
@@ -534,11 +534,17 @@ impl NamespaceableTreeStore for MemoryTreeStore {
 }
 
 impl Db<32, Sha256> for MemoryTreeStore {
+    type DbError = database::Error;
+
     fn get_root_node(&self) -> Option<Branch<32, Sha256>> {
         self.root_node.get(&self.namespace).cloned()
     }
 
-    fn get_children(&self, height: usize, key: [u8; 32]) -> (Node<32, Sha256>, Node<32, Sha256>) {
+    fn get_children(
+        &self,
+        height: usize,
+        key: [u8; 32],
+    ) -> Result<(Node<32, Sha256>, Node<32, Sha256>), TreeError<Self::DbError>> {
         let get_node = |height: usize, key: [u8; 32]| {
             if key == self.empty_tree()[height].hash() {
                 self.empty_tree()[height].clone()
@@ -559,45 +565,62 @@ impl Db<32, Sha256> for MemoryTreeStore {
             panic!("node not found")
         }
         if let Node::Branch(branch) = node {
-            (
+            Ok((
                 get_node(height + 1, branch.left().hash()),
                 get_node(height + 1, branch.right().hash()),
-            )
+            ))
         } else {
             panic!("Should be a branch node")
         }
     }
 
-    fn insert_branch(&mut self, branch: Branch<32, Sha256>) {
+    fn insert_branch(
+        &mut self,
+        branch: Branch<32, Sha256>,
+    ) -> Result<(), TreeError<Self::DbError>> {
         self.branches
             .insert((self.namespace.clone(), branch.hash()), branch);
+        Ok(())
     }
-    fn insert_leaf(&mut self, leaf: Leaf<32, Sha256>) {
+    fn insert_leaf(&mut self, leaf: Leaf<32, Sha256>) -> Result<(), TreeError<Self::DbError>> {
         self.leaves
             .insert((self.namespace.clone(), leaf.hash()), leaf);
+        Ok(())
     }
-    fn insert_compact_leaf(&mut self, compact_leaf: CompactLeaf<32, Sha256>) {
+    fn insert_compact_leaf(
+        &mut self,
+        compact_leaf: CompactLeaf<32, Sha256>,
+    ) -> Result<(), TreeError<Self::DbError>> {
         self.compact_leaves
             .insert((self.namespace.clone(), compact_leaf.hash()), compact_leaf);
+        Ok(())
     }
 
-    fn update_root(&mut self, root: Branch<32, Sha256>) {
+    fn update_root(&mut self, root: Branch<32, Sha256>) -> Result<(), TreeError<Self::DbError>> {
         self.root_node.insert(self.namespace.clone(), root);
+        Ok(())
     }
 
-    fn delete_branch(&mut self, key: &[u8; 32]) {
+    fn delete_branch(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
         self.branches.remove(&(self.namespace.clone(), *key));
+        Ok(())
     }
 
-    fn delete_leaf(&mut self, key: &[u8; 32]) {
+    fn delete_leaf(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
         self.leaves.remove(&(self.namespace.clone(), *key));
+        Ok(())
     }
 
-    fn delete_compact_leaf(&mut self, key: &[u8; 32]) {
+    fn delete_compact_leaf(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
         self.compact_leaves.remove(&(self.namespace.clone(), *key));
+        Ok(())
     }
 
     fn empty_tree(&self) -> Arc<[Node<32, Sha256>; 257]> {
         self.empty_tree.clone()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

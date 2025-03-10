@@ -9,8 +9,7 @@ use cdk_common::common::{ArcTreeStore, LnKey, NamespaceableTreeStore, QuoteTTL};
 use cdk_common::database::{self, MintDatabase};
 use cdk_common::mint::MintKeySetInfo;
 use futures::StreamExt;
-use merkle_sum_sparse_tree::compact_tree::CompactMSSMT;
-use merkle_sum_sparse_tree::node::{Hasher, Leaf};
+use mssmt::{CompactMSSMT, Hasher, Leaf};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use subscription::PubSubManager;
@@ -478,8 +477,8 @@ impl Mint {
             .await;
 
             pols.push(ProofOfLiability {
-                mint_tree_root: mint_tree.root().hash(),
-                melt_tree_root: melt_tree.root().hash(),
+                mint_tree_root: mint_tree?.root()?.hash(),
+                melt_tree_root: melt_tree?.root()?.hash(),
             });
         }
         let elapsed = fn_now.elapsed();
@@ -504,8 +503,8 @@ impl ProofOfLiability {
         localstore: &Arc<impl MintDatabase<Err = database::Error> + ?Sized>,
         db: ArcTreeStore,
         keyset_id: Id,
-    ) -> CompactMSSMT<32, Sha256> {
-        let mut mint_tree = CompactMSSMT::<32, Sha256>::new(Box::new(db.clone()));
+    ) -> Result<CompactMSSMT<32, Sha256, database::Error>, Error> {
+        let mut mint_tree = CompactMSSMT::<32, Sha256, database::Error>::new(Box::new(db.clone()));
         let mints = localstore
             .get_blind_signatures_for_keyset(&keyset_id)
             .await
@@ -513,18 +512,19 @@ impl ProofOfLiability {
         for sig in mints {
             let (key, leaf) = Self::blind_signature_to_leaf(&sig);
             if db.get_leaf(&leaf.hash()).is_none() {
-                mint_tree.insert(key, leaf);
+                mint_tree.insert(key, leaf)?;
             }
         }
-        mint_tree
+        Ok(mint_tree)
     }
 
     async fn get_melt_tree(
         localstore: &Arc<impl MintDatabase<Err = database::Error> + ?Sized>,
         db: ArcTreeStore,
         keyset_id: Id,
-    ) -> CompactMSSMT<32, Sha256> {
-        let mut melt_tree = CompactMSSMT::<32, Sha256>::new(Box::new(db.clone()));
+    ) -> Result<CompactMSSMT<32, Sha256, database::Error>, Error> {
+        // Tree creation can't fail
+        let mut melt_tree = CompactMSSMT::<32, Sha256, database::Error>::new(Box::new(db.clone()));
         let melts = localstore
             .get_proofs_by_keyset_id(&keyset_id)
             .await
@@ -533,10 +533,10 @@ impl ProofOfLiability {
         for proof in melts {
             let (key, leaf) = Self::secret_to_leaf(&proof);
             if db.get_leaf(&leaf.hash()).is_none() {
-                melt_tree.insert(key, leaf);
+                melt_tree.insert(key, leaf)?;
             }
         }
-        melt_tree
+        Ok(melt_tree)
     }
 
     // Keep the helper functions for creating leaves

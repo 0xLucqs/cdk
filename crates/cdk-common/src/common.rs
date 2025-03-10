@@ -1,9 +1,9 @@
 //! Types
 
+use std::any::Any;
 use std::sync::Arc;
 
-use merkle_sum_sparse_tree::node::{Branch, CompactLeaf, Leaf, Node};
-use merkle_sum_sparse_tree::tree::Db;
+use mssmt::{Branch, CompactLeaf, Db, Leaf, Node, TreeError};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tokio::sync::Mutex;
@@ -15,7 +15,7 @@ use crate::nuts::{
     CurrencyUnit, MeltQuoteState, PaymentMethod, Proof, Proofs, PublicKey, SpendingConditions,
     State,
 };
-use crate::Amount;
+use crate::{database, Amount};
 
 /// Melt response with proofs
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -180,10 +180,10 @@ impl QuoteTTL {
 }
 
 #[derive(Clone)]
-pub struct ArcTreeStore(Arc<Mutex<dyn NamespaceableTreeStore>>);
+pub struct ArcTreeStore(Arc<Mutex<dyn NamespaceableTreeStore<DbError = database::Error>>>);
 
 impl ArcTreeStore {
-    pub fn new(db: impl NamespaceableTreeStore) -> Self {
+    pub fn new(db: impl NamespaceableTreeStore<DbError = database::Error>) -> Self {
         Self(Arc::new(Mutex::new(db)))
     }
 }
@@ -204,23 +204,34 @@ impl NamespaceableTreeStore for ArcTreeStore {
 }
 
 impl Db<32, Sha256> for ArcTreeStore {
+    type DbError = database::Error;
     fn get_root_node(&self) -> Option<Branch<32, Sha256>> {
         tokio::task::block_in_place(|| self.0.blocking_lock().get_root_node())
     }
 
-    fn get_children(&self, height: usize, key: [u8; 32]) -> (Node<32, Sha256>, Node<32, Sha256>) {
+    fn get_children(
+        &self,
+        height: usize,
+        key: [u8; 32],
+    ) -> Result<(Node<32, Sha256>, Node<32, Sha256>), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| self.0.blocking_lock().get_children(height, key))
     }
 
-    fn insert_leaf(&mut self, leaf: Leaf<32, Sha256>) {
+    fn insert_leaf(&mut self, leaf: Leaf<32, Sha256>) -> Result<(), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| self.0.blocking_lock().insert_leaf(leaf))
     }
 
-    fn insert_branch(&mut self, branch: Branch<32, Sha256>) {
+    fn insert_branch(
+        &mut self,
+        branch: Branch<32, Sha256>,
+    ) -> Result<(), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| self.0.blocking_lock().insert_branch(branch))
     }
 
-    fn insert_compact_leaf(&mut self, compact_leaf: CompactLeaf<32, Sha256>) {
+    fn insert_compact_leaf(
+        &mut self,
+        compact_leaf: CompactLeaf<32, Sha256>,
+    ) -> Result<(), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| self.0.blocking_lock().insert_compact_leaf(compact_leaf))
     }
 
@@ -228,20 +239,23 @@ impl Db<32, Sha256> for ArcTreeStore {
         tokio::task::block_in_place(|| self.0.blocking_lock().empty_tree())
     }
 
-    fn update_root(&mut self, root: Branch<32, Sha256>) {
+    fn update_root(&mut self, root: Branch<32, Sha256>) -> Result<(), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| self.0.blocking_lock().update_root(root))
     }
 
-    fn delete_branch(&mut self, key: &[u8; 32]) {
+    fn delete_branch(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| self.0.blocking_lock().delete_branch(key))
     }
 
-    fn delete_leaf(&mut self, key: &[u8; 32]) {
+    fn delete_leaf(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| self.0.blocking_lock().delete_leaf(key))
     }
 
-    fn delete_compact_leaf(&mut self, key: &[u8; 32]) {
+    fn delete_compact_leaf(&mut self, key: &[u8; 32]) -> Result<(), TreeError<Self::DbError>> {
         tokio::task::block_in_place(|| self.0.blocking_lock().delete_compact_leaf(key))
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

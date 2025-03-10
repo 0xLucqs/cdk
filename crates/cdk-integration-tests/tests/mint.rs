@@ -22,7 +22,7 @@ use cdk::types::{ArcTreeStore, QuoteTTL};
 use cdk::util::unix_time;
 use cdk::Mint;
 use cdk_fake_wallet::FakeWallet;
-use merkle_sum_sparse_tree::tree::EmptyTree;
+use mssmt::EmptyTree;
 use sha2::Sha256;
 use tokio::sync::OnceCell;
 use tokio::time::sleep;
