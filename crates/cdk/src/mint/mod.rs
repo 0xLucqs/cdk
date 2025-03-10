@@ -5,9 +5,12 @@ use std::sync::Arc;
 
 use bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv};
 use bitcoin::secp256k1::{self, Secp256k1};
-use cdk_common::common::{ArcTreeStore, LnKey, NamespaceableTreeStore, QuoteTTL};
+use cdk_common::common::{
+    ArcTreeStore, LnKey, MerkleProof, MerkleProofItem, NamespaceableTreeStore, QuoteTTL,
+};
 use cdk_common::database::{self, MintDatabase};
 use cdk_common::mint::MintKeySetInfo;
+use cdk_common::secret::Secret;
 use futures::StreamExt;
 use mssmt::{CompactMSSMT, Hasher, Leaf};
 use serde::{Deserialize, Serialize};
@@ -458,33 +461,78 @@ impl Mint {
         let mut keysets = self.localstore.get_keyset_infos().await?;
         keysets.sort_by_key(|mint_key_set_info| mint_key_set_info.valid_from);
         let mut pols = Vec::with_capacity(keysets.len());
-        let mut tree_store = self.tree_store.clone();
+        let mut mint_tree_store = self.tree_store.clone();
+        let mut melt_tree_store = self.tree_store.clone();
 
         for keyset_info in keysets {
-            tree_store.set_namespace(&format!("mint_{}", keyset_info.id));
+            mint_tree_store.set_namespace(&format!("mint_{}", keyset_info.id));
             let mint_tree = ProofOfLiability::get_mint_tree(
                 &self.localstore,
-                self.tree_store.clone(),
+                mint_tree_store.clone(),
                 keyset_info.id,
             )
             .await;
-            tree_store.set_namespace(&format!("melt_{}", keyset_info.id));
+            let mint_tree_root = mint_tree?.root()?.hash();
+            melt_tree_store.set_namespace(&format!("melt_{}", keyset_info.id));
             let melt_tree = ProofOfLiability::get_melt_tree(
                 &self.localstore,
-                self.tree_store.clone(),
+                melt_tree_store.clone(),
                 keyset_info.id,
             )
             .await;
-
+            let melt_tree_root = melt_tree?.root()?.hash();
             pols.push(ProofOfLiability {
-                mint_tree_root: mint_tree?.root()?.hash(),
-                melt_tree_root: melt_tree?.root()?.hash(),
+                mint_tree_root,
+                melt_tree_root,
             });
         }
         let elapsed = fn_now.elapsed();
         println!("FN Elapsed: {:.2?}", elapsed);
 
         Ok(pols)
+    }
+
+    /// Get the merkle proof for a mint
+    #[instrument(skip_all)]
+    pub async fn get_melt_merkle_proof(&self, secret: &str) -> Result<Option<MerkleProof>, Error> {
+        let secret = Secret::new(secret);
+        let keyset = self
+            .localstore
+            .get_keyset_id_for_secret(secret.clone())
+            .await?;
+        let mut tree_store = self.tree_store.clone();
+        tree_store.set_namespace(&format!("melt_{}", keyset.unwrap()));
+        let melt_tree = CompactMSSMT::<32, Sha256, database::Error>::new(Box::new(tree_store));
+
+        let proof = melt_tree.merkle_proof(<Sha256 as Hasher<32>>::hash(secret.as_bytes()))?;
+        Ok(Some(MerkleProof::new(
+            proof
+                .into_iter()
+                .map(|p| MerkleProofItem::new(p.sum(), p.hash()))
+                .collect(),
+        )))
+    }
+
+    /// Get the merkle proof for a mint
+    #[instrument(skip_all)]
+    pub async fn get_mint_merkle_proof(&self, c: &str) -> Result<Option<MerkleProof>, Error> {
+        let blinded_signature = PublicKey::from_hex(c)?;
+        let keyset = self
+            .localstore
+            .get_keyset_id_for_blinded_signature(&blinded_signature)
+            .await?;
+        let mut tree_store = self.tree_store.clone();
+        tree_store.set_namespace(&format!("mint_{}", keyset.unwrap()));
+        let mint_tree = CompactMSSMT::<32, Sha256, database::Error>::new(Box::new(tree_store));
+
+        let proof =
+            mint_tree.merkle_proof(<Sha256 as Hasher<32>>::hash(&blinded_signature.to_bytes()))?;
+        Ok(Some(MerkleProof::new(
+            proof
+                .into_iter()
+                .map(|p| MerkleProofItem::new(p.sum(), p.hash()))
+                .collect(),
+        )))
     }
 }
 
@@ -542,11 +590,11 @@ impl ProofOfLiability {
     // Keep the helper functions for creating leaves
     fn blind_signature_to_leaf(sig: &BlindSignature) -> ([u8; 32], Leaf<32, Sha256>) {
         let key = <Sha256 as Hasher<32>>::hash(sig.c.to_bytes().as_slice());
-
         let value = sig.c.to_bytes();
         let sum = u64::from(sig.amount);
+        let leaf = Leaf::new(value.to_vec(), sum);
 
-        (key, Leaf::new(value.to_vec(), sum))
+        (key, leaf)
     }
 
     fn secret_to_leaf(proof: &Proof) -> ([u8; 32], Leaf<32, Sha256>) {

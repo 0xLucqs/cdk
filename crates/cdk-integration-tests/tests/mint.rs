@@ -22,7 +22,7 @@ use cdk::types::{ArcTreeStore, QuoteTTL};
 use cdk::util::unix_time;
 use cdk::Mint;
 use cdk_fake_wallet::FakeWallet;
-use mssmt::EmptyTree;
+use mssmt::{ComputedNode, EmptyTree, Hasher, Leaf, Node};
 use sha2::Sha256;
 use tokio::sync::OnceCell;
 use tokio::time::sleep;
@@ -185,7 +185,7 @@ async fn test_proof_of_liabilities() -> Result<()> {
     let keyset_id = Id::from(&keys);
 
     // Mint some tokens to create blind signatures
-    let _sigs =
+    let sigs =
         mint_blinded_signatures(&mint, 100.into(), &SplitTarget::default(), keys.clone()).await?;
 
     // Get proof of liabilities before any melts
@@ -205,14 +205,43 @@ async fn test_proof_of_liabilities() -> Result<()> {
     // Now create some proofs and melt them
     let proofs = mint_proofs(&mint, 100.into(), &SplitTarget::default(), keys).await?;
     let preswap = PreMintSecrets::random(keyset_id, 100.into(), &SplitTarget::default())?;
-    let swap_request = SwapRequest::new(proofs, preswap.blinded_messages());
+    let swap_request = SwapRequest::new(proofs.clone(), preswap.blinded_messages());
     mint.process_swap_request(swap_request).await?;
 
     // Get proof of liabilities after melts
     let pols_after = mint.proof_of_liabilities().await?;
-    let _pol_after = &pols_after[0]; // make sure there's at least one PoL
-                                     // Useless test but still something
+    let pol_after = &pols_after[0]; // make sure there's at least one PoL
+                                    // Useless test but still something
+    let proof = mint.get_mint_merkle_proof(&sigs[0].c.to_string()).await?;
+    mssmt::verify_merkle_proof::<32, Sha256, ()>(
+        <Sha256 as Hasher<32>>::hash(&sigs[0].c.to_bytes()),
+        Leaf::<32, Sha256>::new(sigs[0].c.to_bytes().to_vec(), sigs[0].amount.into()),
+        proof
+            .unwrap()
+            .items
+            .iter()
+            .map(|item| Node::Computed(ComputedNode::new(item.node_hash(), item.sum())))
+            .collect(),
+        pol_after.mint_tree_root,
+    )
+    .unwrap();
 
+    let proof = proofs.iter().find(|p| p.amount == 64.into()).unwrap();
+    let merkle_proof = mint
+        .get_melt_merkle_proof(&proof.secret.to_string())
+        .await?;
+    mssmt::verify_merkle_proof::<32, Sha256, ()>(
+        <Sha256 as Hasher<32>>::hash(&proof.secret.to_bytes()),
+        Leaf::<32, Sha256>::new(proof.secret.to_bytes(), proof.amount.into()),
+        merkle_proof
+            .unwrap()
+            .items
+            .iter()
+            .map(|item| Node::Computed(ComputedNode::new(item.node_hash(), item.sum())))
+            .collect(),
+        pol_after.melt_tree_root,
+    )
+    .unwrap();
     Ok(())
 }
 

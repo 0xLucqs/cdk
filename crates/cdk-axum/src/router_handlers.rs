@@ -12,6 +12,7 @@ use cdk::nuts::{
     SwapRequest, SwapResponse,
 };
 use cdk::util::unix_time;
+use cdk_common::common::MerkleProof;
 use paste::paste;
 use tracing::instrument;
 use uuid::Uuid;
@@ -413,7 +414,7 @@ pub async fn post_restore(
 #[cfg_attr(feature = "swagger", utoipa::path(
     get,
     context_path = "/v1",
-    path = "/proof_of_liabilities",
+    path = "/proof/liabilities",
     responses(
         (status = 200, description = "Successful response", body = Vec<ProofOfLiability>)
     )
@@ -428,6 +429,63 @@ pub async fn get_proof_of_liabilities(
             into_response(err)
         },
     )?))
+}
+
+#[cfg_attr(feature = "swagger", utoipa::path(
+    get,
+    context_path = "/v1",
+    path = "/proof/mint/{c}",
+    params(
+        ("c" = String, description = "The blind signature of the mint")
+    ),
+    responses(
+        (status = 200, description = "Successful response", body = Option<MerkleProof>)
+    )
+))]
+/// Proof of liabilities for all epochs
+pub async fn get_mint_merkle_proof(
+    State(state): State<MintState>,
+    Path(c): Path<String>,
+) -> Result<Json<Option<MerkleProof>>, Response> {
+    Ok(Json(
+        state
+            .mint
+            .get_mint_merkle_proof(&c)
+            .await
+            .map_err(|err| {
+                tracing::error!("Could not get mint merkle proof: {}", err);
+                into_response(err)
+            })
+            .unwrap_or_default(),
+    ))
+}
+#[cfg_attr(feature = "swagger", utoipa::path(
+    get,
+    context_path = "/v1",
+    path = "/proof/melt/{secret}",
+    params(
+        ("secret" = String, description = "The secret of the mint")
+    ),
+    responses(
+        (status = 200, description = "Successful response", body = Option<MerkleProof>)
+    )
+))]
+/// Proof of liabilities for all epochs
+pub async fn get_melt_merkle_proof(
+    State(state): State<MintState>,
+    Path(secret): Path<String>,
+) -> Result<Json<Option<MerkleProof>>, Response> {
+    Ok(Json(
+        state
+            .mint
+            .get_melt_merkle_proof(&secret)
+            .await
+            .map_err(|err| {
+                tracing::error!("Could not get melt merkle proof: {}", err);
+                into_response(err)
+            })
+            .unwrap_or_default(),
+    ))
 }
 
 pub fn into_response<T>(error: T) -> Response

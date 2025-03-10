@@ -25,7 +25,9 @@ use futures::{join, SinkExt, StreamExt};
 use lightning_invoice::Bolt11Invoice;
 use ln_regtest_rs::ln_client::{ClnClient, LightningClient, LndClient};
 use ln_regtest_rs::InvoiceStatus;
+use mssmt::{ComputedNode, Hasher, Leaf};
 use serde_json::json;
+use sha2::Sha256;
 use tokio::time::timeout;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -78,6 +80,7 @@ async fn get_notification<T: StreamExt<Item = Result<Message, E>> + Unpin, E: De
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_regtest_mint_melt_round_trip() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
     let lnd_client = init_lnd_client().await;
 
     let wallet = Wallet::new(
@@ -97,8 +100,8 @@ async fn test_regtest_mint_melt_round_trip() -> Result<()> {
 
     lnd_client.pay_invoice(mint_quote.request).await.unwrap();
 
-    let proofs = wallet
-        .mint(&mint_quote.id, SplitTarget::default(), None)
+    let (proofs, blinded_signatures) = wallet
+        .mint_and_return_blinded_signature(&mint_quote.id, SplitTarget::default(), None)
         .await?;
 
     let mint_amount = proofs.total_amount()?;
@@ -157,11 +160,76 @@ async fn test_regtest_mint_melt_round_trip() -> Result<()> {
     assert_eq!(payload.quote.to_string(), melt.id);
     assert_eq!(payload.state, MeltQuoteState::Paid);
     // Terrible test but that's something
+    tracing::info!("Getting proof of liabilities");
+    // Getting the proof of liabilities will save the trees in the database which we need
+    // to get the merkle proofs
+    let proof_of_liabilities = wallet.get_proof_of_liabilities().await.unwrap().unwrap();
     assert_eq!(
-        wallet.get_proof_of_liabilities().await.unwrap().unwrap(),
+        proof_of_liabilities,
         wallet.get_proof_of_liabilities().await.unwrap().unwrap()
     );
+    tracing::info!("Merkle proofs");
+    {
+        tracing::info!("Checking that all the mints are included in the proof of liabilities");
+        for blind_signature in blinded_signatures {
+            tracing::info!(
+                "Checking that the mint {} is included in the proof of liabilities",
+                blind_signature.c.to_hex()
+            );
+            let merkle_proof = wallet
+                .get_mint_merkle_proof(&blind_signature.c.to_hex())
+                .await
+                .unwrap()
+                .unwrap();
+            tracing::info!("Verifying the proof");
+            mssmt::verify_merkle_proof::<32, Sha256, ()>(
+                <Sha256 as Hasher<32>>::hash(&blind_signature.c.to_bytes()),
+                Leaf::<32, Sha256>::new(
+                    blind_signature.c.to_bytes().to_vec(),
+                    blind_signature.amount.into(),
+                ),
+                merkle_proof
+                    .items
+                    .iter()
+                    .map(|item| {
+                        mssmt::Node::Computed(ComputedNode::new(item.node_hash(), item.sum()))
+                    })
+                    .collect(),
+                proof_of_liabilities[0].mint_tree_root,
+            )
+            .unwrap();
+            tracing::info!("Proof verified");
+        }
 
+        {
+            let proof = proofs.iter().find(|p| p.amount == 64.into()).unwrap();
+            tracing::info!(
+                "Checking that the melt {} is included in the proof of liabilities",
+                proof.secret
+            );
+            let merkle_proof = wallet
+                .get_melt_merkle_proof(&proof.secret.to_string())
+                .await
+                .unwrap()
+                .unwrap();
+            tracing::info!("Verifying the proof");
+            assert!(mssmt::verify_merkle_proof::<32, Sha256, ()>(
+                <Sha256 as Hasher<32>>::hash(proof.secret.as_bytes()),
+                Leaf::<32, Sha256>::new(proof.secret.to_bytes(), proof.amount.into()),
+                merkle_proof
+                    .items
+                    .iter()
+                    .map(|item| mssmt::Node::Computed(ComputedNode::new(
+                        item.node_hash(),
+                        item.sum()
+                    )))
+                    .collect(),
+                proof_of_liabilities[0].melt_tree_root
+            )
+            .is_ok());
+            tracing::info!("Proof verified");
+        }
+    }
     Ok(())
 }
 

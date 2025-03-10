@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use cashu::secret::Secret;
 use cashu::MintInfo;
 use uuid::Uuid;
 
@@ -149,4 +150,11 @@ pub trait Database {
     async fn set_quote_ttl(&self, quote_ttl: QuoteTTL) -> Result<(), Self::Err>;
     /// Get [`QuoteTTL`]
     async fn get_quote_ttl(&self) -> Result<QuoteTTL, Self::Err>;
+    /// Get keyset id for blind signature
+    async fn get_keyset_id_for_blinded_signature(
+        &self,
+        c: &PublicKey,
+    ) -> Result<Option<Id>, Self::Err>;
+    /// Get keyset id for secret
+    async fn get_keyset_id_for_secret(&self, secret: Secret) -> Result<Option<Id>, Self::Err>;
 }

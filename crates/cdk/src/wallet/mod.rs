@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use bitcoin::bip32::Xpriv;
 use bitcoin::Network;
+use cdk_common::common::MerkleProof;
 use cdk_common::database::{self, WalletDatabase};
 use cdk_common::subscription::Params;
 use client::MintConnector;
@@ -600,5 +601,22 @@ impl Wallet {
         tracing::trace!("Proof of liabilities for {}", self.mint_url);
 
         Ok(pol)
+    }
+
+    /// Get the merkle proof for a melt
+    #[instrument(skip(self))]
+    pub async fn get_melt_merkle_proof(&self, secret: &str) -> Result<Option<MerkleProof>, Error> {
+        let proof = self.client.get_melt_merkle_proof(secret).await?;
+        Ok(proof)
+    }
+
+    /// Get the merkle proof for a mint
+    #[instrument(skip(self))]
+    pub async fn get_mint_merkle_proof(
+        &self,
+        blinded_signature: &str,
+    ) -> Result<Option<MerkleProof>, Error> {
+        let proof = self.client.get_mint_merkle_proof(blinded_signature).await?;
+        Ok(proof)
     }
 }

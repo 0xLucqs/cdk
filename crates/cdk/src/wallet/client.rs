@@ -3,6 +3,7 @@
 use std::fmt::Debug;
 
 use async_trait::async_trait;
+use cdk_common::common::MerkleProof;
 use reqwest::{Client, IntoUrl};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -171,7 +172,7 @@ impl MintConnector for HttpClient {
     ) -> Result<MintQuoteBolt11Response<String>, Error> {
         let url = self
             .mint_url
-            .join_paths(&["v1", "mint", "quote", "bolt11", quote_id])?;
+            .join_paths(&["v1", "melt", "quote", "bolt11", quote_id])?;
 
         self.http_get(url).await
     }
@@ -252,10 +253,22 @@ impl MintConnector for HttpClient {
         let url = self.mint_url.join_paths(&["v1", "restore"])?;
         self.http_post(url, &request).await
     }
-    /// Restore request [NUT-13]
+    /// Get Proof of Liabilities
     #[instrument(skip(self), fields(mint_url = %self.mint_url))]
     async fn get_proof_of_liabilities(&self) -> Result<Vec<ProofOfLiability>, Error> {
-        let url = self.mint_url.join_paths(&["v1", "proof_of_liabilities"])?;
+        let url = self.mint_url.join_paths(&["v1", "proof", "liabilities"])?;
+        self.http_get(url).await
+    }
+
+    #[instrument(skip(self), fields(mint_url = %self.mint_url))]
+    async fn get_melt_merkle_proof(&self, secret: &str) -> Result<Option<MerkleProof>, Error> {
+        let url = self.mint_url.join_paths(&["v1", "proof", "melt", secret])?;
+        self.http_get(url).await
+    }
+
+    #[instrument(skip(self), fields(mint_url = %self.mint_url))]
+    async fn get_mint_merkle_proof(&self, secret: &str) -> Result<Option<MerkleProof>, Error> {
+        let url = self.mint_url.join_paths(&["v1", "proof", "mint", secret])?;
         self.http_get(url).await
     }
 }
@@ -314,4 +327,8 @@ pub trait MintConnector: Debug {
     async fn post_restore(&self, request: RestoreRequest) -> Result<RestoreResponse, Error>;
     /// Proof of liability for all epochs of this mint
     async fn get_proof_of_liabilities(&self) -> Result<Vec<ProofOfLiability>, Error>;
+    /// Get Merkle proof for a blind signature
+    async fn get_melt_merkle_proof(&self, secret: &str) -> Result<Option<MerkleProof>, Error>;
+    /// Get Merkle proof for a mint
+    async fn get_mint_merkle_proof(&self, secret: &str) -> Result<Option<MerkleProof>, Error>;
 }

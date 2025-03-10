@@ -42,7 +42,7 @@ bitcoin = { version = "0.32.2", features = [
     "rand",
     "rand-std",
 ] }
-mssmt = { path = "../../../merkle-sum-sparse-tree", features = ["multi-thread"] }
+mssmt = { version = "0.0.5", features = ["multi-thread"] }
 sha2 = "0.10.8"
 tokio = { version = "1", default-features = false, features = ["signal"] }
 tracing = { version = "0.1", default-features = false, features = [

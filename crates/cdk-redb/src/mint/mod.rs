@@ -12,6 +12,7 @@ use cdk_common::database::{self, MintDatabase};
 use cdk_common::dhke::hash_to_curve;
 use cdk_common::mint::{self, MintKeySetInfo, MintQuote};
 use cdk_common::nut00::ProofsMethods;
+use cdk_common::secret::Secret;
 use cdk_common::{
     BlindSignature, CurrencyUnit, Id, MeltBolt11Request, MeltQuoteState, MintInfo, MintQuoteState,
     Proof, Proofs, PublicKey, State,
@@ -923,5 +924,44 @@ impl MintDatabase for MintRedbDatabase {
         }
 
         Err(Error::UnknownQuoteTTL.into())
+    }
+
+    async fn get_keyset_id_for_secret(&self, secret: Secret) -> Result<Option<Id>, Self::Err> {
+        let read_txn = self.db.begin_read().map_err(Error::from)?;
+        let table = read_txn.open_table(PROOFS_TABLE).map_err(Error::from)?;
+        let mut proof = table
+            .iter()
+            .map_err(Error::from)?
+            .flatten()
+            .flat_map(|(_, v)| {
+                if let Ok(proof) = serde_json::from_str::<Proof>(v.value()) {
+                    (proof.secret == secret).then_some(proof)
+                } else {
+                    None
+                }
+            });
+
+        Ok(proof.next().map(|p| p.keyset_id))
+    }
+
+    async fn get_keyset_id_for_blinded_signature(
+        &self,
+        blinded_signature: &PublicKey,
+    ) -> Result<Option<Id>, Self::Err> {
+        let read_txn = self.db.begin_read().map_err(Error::from)?;
+        let table = read_txn
+            .open_table(BLINDED_SIGNATURES)
+            .map_err(Error::from)?;
+
+        Ok(table
+            .get(blinded_signature.to_bytes())
+            .map_err(Error::from)?
+            .and_then(|v| {
+                if let Ok(blind_sig) = serde_json::from_str::<BlindSignature>(v.value()) {
+                    (blind_sig.c == *blinded_signature).then_some(blind_sig.keyset_id)
+                } else {
+                    None
+                }
+            }))
     }
 }

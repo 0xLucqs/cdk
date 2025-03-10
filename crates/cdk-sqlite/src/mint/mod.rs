@@ -1479,6 +1479,69 @@ WHERE id=?;
             },
         }
     }
+
+    async fn get_keyset_id_for_secret(&self, secret: Secret) -> Result<Option<Id>, Self::Err> {
+        let mut transaction = self.pool.begin().await.map_err(Error::from)?;
+
+        let rec = sqlx::query(
+            r#"
+SELECT keyset_id
+FROM proof
+WHERE secret=?;
+            "#,
+        )
+        .bind(secret.to_string())
+        .fetch_one(&mut transaction)
+        .await;
+
+        match rec {
+            Ok(rec) => {
+                transaction.commit().await.map_err(Error::from)?;
+                let keyset_id: String = rec.try_get("keyset_id").map_err(Error::from)?;
+                Ok(Some(Id::from_str(&keyset_id).map_err(Error::from)?))
+            }
+            Err(err) => {
+                tracing::error!("SQLite could not get keyset id for secret");
+                if let Err(err) = transaction.rollback().await {
+                    tracing::error!("Could not rollback sql transaction: {}", err);
+                }
+                Err(Error::SQLX(err).into())
+            }
+        }
+    }
+
+    async fn get_keyset_id_for_blinded_signature(
+        &self,
+        blinded_signature: &PublicKey,
+    ) -> Result<Option<Id>, Self::Err> {
+        let mut transaction = self.pool.begin().await.map_err(Error::from)?;
+
+        let rec = sqlx::query(
+            r#"
+SELECT keyset_id
+FROM blind_signature
+WHERE c=?;
+            "#,
+        )
+        .bind::<&[u8]>(blinded_signature.to_bytes().as_ref())
+        .fetch_one(&mut transaction)
+        .await;
+
+        match rec {
+            Ok(rec) => {
+                transaction.commit().await.map_err(Error::from)?;
+                let keyset_id: String = rec.try_get("keyset_id").map_err(Error::from)?;
+                Ok(Some(Id::from_str(&keyset_id).map_err(Error::from)?))
+            }
+            Err(err) => {
+                tracing::error!("SQLite could not get keyset id for blinded signature");
+                if let Err(err) = transaction.rollback().await {
+                    tracing::error!("Could not rollback sql transaction: {}", err);
+                }
+                Err(Error::SQLX(err).into())
+            }
+        }
+    }
 }
 
 fn sqlite_row_to_keyset_info(row: SqliteRow) -> Result<MintKeySetInfo, Error> {

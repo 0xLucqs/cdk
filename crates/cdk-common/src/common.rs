@@ -179,6 +179,46 @@ impl QuoteTTL {
     }
 }
 
+/// Merkle proof item
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MerkleProofItem {
+    /// Sum
+    sum: u64,
+    /// Node hash
+    node_hash: [u8; 32],
+}
+
+impl MerkleProofItem {
+    /// Create new [`MerkleProofItem`]
+    pub fn new(sum: u64, node_hash: [u8; 32]) -> Self {
+        Self { sum, node_hash }
+    }
+
+    /// Get the sum
+    pub fn sum(&self) -> u64 {
+        self.sum
+    }
+
+    /// Get the node hash
+    pub fn node_hash(&self) -> [u8; 32] {
+        self.node_hash
+    }
+}
+
+/// Merkle proof
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MerkleProof {
+    /// Items
+    pub items: Vec<MerkleProofItem>,
+}
+
+impl MerkleProof {
+    /// Create new [`MerkleProof`]
+    pub fn new(items: Vec<MerkleProofItem>) -> Self {
+        Self { items }
+    }
+}
+
 #[derive(Clone)]
 pub struct ArcTreeStore(Arc<Mutex<dyn NamespaceableTreeStore<DbError = database::Error>>>);
 

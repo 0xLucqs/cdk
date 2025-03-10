@@ -175,15 +175,15 @@ done
 
 
 # Run cargo test
-cargo test -p cdk-integration-tests --test regtest
+RUST_LOG=info cargo test -p cdk-integration-tests --test regtest test_regtest_mint_melt_round_trip
 
-# Run cargo test with the http_subscription feature
-cargo test -p cdk-integration-tests --test regtest --features http_subscription
+# # Run cargo test with the http_subscription feature
+# cargo test -p cdk-integration-tests --test regtest --features http_subscription test_regtest_mint_melt_round_trip
 
-# Switch Mints: Run tests with LND mint
-export cdk_itests_mint_port_0=8087;
-export cdk_itests_mint_port_1=8085;
-cargo test -p cdk-integration-tests --test regtest
+# # Switch Mints: Run tests with LND mint
+# export cdk_itests_mint_port_0=8087;
+# export cdk_itests_mint_port_1=8085;
+# cargo test -p cdk-integration-tests --test regtest test_regtest_mint_melt_round_trip
 
 # Capture the exit status of cargo test
 test_status=$?

@@ -9,6 +9,7 @@ use cdk_common::common::{NamespaceableTreeStore, QuoteTTL};
 use cdk_common::database::{self, Error, MintDatabase};
 use cdk_common::mint::MintKeySetInfo;
 use cdk_common::nut00::ProofsMethods;
+use cdk_common::secret::Secret;
 use cdk_common::MintInfo;
 use mssmt::{Branch, CompactLeaf, Db, EmptyTree, Leaf, Node, TreeError};
 use sha2::Sha256;
@@ -492,6 +493,29 @@ impl MintDatabase for MintMemoryDatabase {
         let quote_ttl = self.quote_ttl.read().await;
 
         Ok(*quote_ttl)
+    }
+
+    async fn get_keyset_id_for_secret(&self, secret: Secret) -> Result<Option<Id>, Self::Err> {
+        Ok(self
+            .proofs
+            .read()
+            .await
+            .values()
+            .find(|p| p.secret == secret)
+            .map(|p| p.keyset_id))
+    }
+
+    async fn get_keyset_id_for_blinded_signature(
+        &self,
+        blinded_signature: &PublicKey,
+    ) -> Result<Option<Id>, Self::Err> {
+        Ok(self
+            .blinded_signatures
+            .read()
+            .await
+            .values()
+            .find(|b| b.c == *blinded_signature)
+            .map(|k| k.keyset_id))
     }
 }
 

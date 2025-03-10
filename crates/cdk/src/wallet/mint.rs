@@ -1,3 +1,4 @@
+use cdk_common::BlindSignature;
 use tracing::instrument;
 
 use super::MintQuote;
@@ -288,5 +289,157 @@ impl Wallet {
         self.localstore.update_proofs(proof_infos, vec![]).await?;
 
         Ok(proofs)
+    }
+    /// Mint
+    /// # Synopsis
+    /// ```rust
+    /// use std::sync::Arc;
+    ///
+    /// use anyhow::Result;
+    /// use cdk::amount::{Amount, SplitTarget};
+    /// use cdk::cdk_database::WalletMemoryDatabase;
+    /// use cdk::nuts::nut00::ProofsMethods;
+    /// use cdk::nuts::CurrencyUnit;
+    /// use cdk::wallet::Wallet;
+    /// use rand::Rng;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<()> {
+    ///     let seed = rand::thread_rng().gen::<[u8; 32]>();
+    ///     let mint_url = "https://testnut.cashu.space";
+    ///     let unit = CurrencyUnit::Sat;
+    ///
+    ///     let localstore = WalletMemoryDatabase::default();
+    ///     let wallet = Wallet::new(mint_url, unit, Arc::new(localstore), &seed, None).unwrap();
+    ///     let amount = Amount::from(100);
+    ///
+    ///     let quote = wallet.mint_quote(amount, None).await?;
+    ///     let quote_id = quote.id;
+    ///     // To be called after quote request is paid
+    ///     let minted_proofs = wallet.mint(&quote_id, SplitTarget::default(), None).await?;
+    ///     let minted_amount = minted_proofs.total_amount()?;
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
+    #[instrument(skip(self))]
+    pub async fn mint_and_return_blinded_signature(
+        &self,
+        quote_id: &str,
+        amount_split_target: SplitTarget,
+        spending_conditions: Option<SpendingConditions>,
+    ) -> Result<(Proofs, Vec<BlindSignature>), Error> {
+        // Check that mint is in store of mints
+        if self
+            .localstore
+            .get_mint(self.mint_url.clone())
+            .await?
+            .is_none()
+        {
+            self.get_mint_info().await?;
+        }
+
+        let quote_info = self.localstore.get_mint_quote(quote_id).await?;
+
+        let quote_info = if let Some(quote) = quote_info {
+            if quote.expiry.le(&unix_time()) && quote.expiry.ne(&0) {
+                return Err(Error::ExpiredQuote(quote.expiry, unix_time()));
+            }
+
+            quote.clone()
+        } else {
+            return Err(Error::UnknownQuote);
+        };
+
+        let active_keyset_id = self.get_active_mint_keyset().await?.id;
+
+        let count = self
+            .localstore
+            .get_keyset_counter(&active_keyset_id)
+            .await?;
+
+        let count = count.map_or(0, |c| c + 1);
+
+        let premint_secrets = match &spending_conditions {
+            Some(spending_conditions) => PreMintSecrets::with_conditions(
+                active_keyset_id,
+                quote_info.amount,
+                &amount_split_target,
+                spending_conditions,
+            )?,
+            None => PreMintSecrets::from_xpriv(
+                active_keyset_id,
+                count,
+                self.xpriv,
+                quote_info.amount,
+                &amount_split_target,
+            )?,
+        };
+
+        let mut request = MintBolt11Request {
+            quote: quote_id.to_string(),
+            outputs: premint_secrets.blinded_messages(),
+            signature: None,
+        };
+
+        if let Some(secret_key) = quote_info.secret_key {
+            request.sign(secret_key)?;
+        }
+
+        let mint_res = self.client.post_mint(request).await?;
+
+        let keys = self.get_keyset_keys(active_keyset_id).await?;
+
+        // Verify the signature DLEQ is valid
+        {
+            for (sig, premint) in mint_res.signatures.iter().zip(&premint_secrets.secrets) {
+                let keys = self.get_keyset_keys(sig.keyset_id).await?;
+                let key = keys.amount_key(sig.amount).ok_or(Error::AmountKey)?;
+                match sig.verify_dleq(key, premint.blinded_message.blinded_secret) {
+                    Ok(_) | Err(nut12::Error::MissingDleqProof) => (),
+                    Err(_) => return Err(Error::CouldNotVerifyDleq),
+                }
+            }
+        }
+
+        let proofs = construct_proofs(
+            mint_res.signatures.clone(),
+            premint_secrets.rs(),
+            premint_secrets.secrets(),
+            &keys,
+        )?;
+
+        // Remove filled quote from store
+        self.localstore.remove_mint_quote(&quote_info.id).await?;
+
+        if spending_conditions.is_none() {
+            tracing::debug!(
+                "Incrementing keyset {} counter by {}",
+                active_keyset_id,
+                proofs.len()
+            );
+
+            // Update counter for keyset
+            self.localstore
+                .increment_keyset_counter(&active_keyset_id, proofs.len() as u32)
+                .await?;
+        }
+
+        let proof_infos = proofs
+            .iter()
+            .map(|proof| {
+                ProofInfo::new(
+                    proof.clone(),
+                    self.mint_url.clone(),
+                    State::Unspent,
+                    quote_info.unit.clone(),
+                )
+            })
+            .collect::<Result<Vec<ProofInfo>, _>>()?;
+
+        // Add new proofs to store
+        self.localstore.update_proofs(proof_infos, vec![]).await?;
+
+        Ok((proofs, mint_res.signatures))
     }
 }

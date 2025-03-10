@@ -21,6 +21,7 @@ use cdk::util::unix_time;
 use cdk::wallet::client::MintConnector;
 use cdk::wallet::Wallet;
 use cdk::{Amount, Error, Mint};
+use cdk_common::common::MerkleProof;
 use cdk_fake_wallet::FakeWallet;
 use tokio::sync::Notify;
 use tracing_subscriber::EnvFilter;
@@ -143,6 +144,12 @@ impl MintConnector for DirectMintConnection {
     }
     async fn get_proof_of_liabilities(&self) -> Result<Vec<ProofOfLiability>, Error> {
         self.mint.proof_of_liabilities().await
+    }
+    async fn get_melt_merkle_proof(&self, secret: &str) -> Result<Option<MerkleProof>, Error> {
+        self.mint.get_melt_merkle_proof(secret).await
+    }
+    async fn get_mint_merkle_proof(&self, secret: &str) -> Result<Option<MerkleProof>, Error> {
+        self.mint.get_mint_merkle_proof(secret).await
     }
 }
 
