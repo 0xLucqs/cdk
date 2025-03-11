@@ -952,16 +952,18 @@ impl MintDatabase for MintRedbDatabase {
         let table = read_txn
             .open_table(BLINDED_SIGNATURES)
             .map_err(Error::from)?;
-
-        Ok(table
-            .get(blinded_signature.to_bytes())
+        let keyset = table
+            .iter()
             .map_err(Error::from)?
-            .and_then(|v| {
+            .flatten()
+            .flat_map(|(_, v)| {
                 if let Ok(blind_sig) = serde_json::from_str::<BlindSignature>(v.value()) {
                     (blind_sig.c == *blinded_signature).then_some(blind_sig.keyset_id)
                 } else {
                     None
                 }
-            }))
+            })
+            .next();
+        Ok(keyset)
     }
 }

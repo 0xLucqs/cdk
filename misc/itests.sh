@@ -175,7 +175,7 @@ done
 
 
 # Run cargo test
-RUST_LOG=info cargo test -p cdk-integration-tests --test regtest test_regtest_mint_melt_round_trip
+RUST_LOG=info cargo test -p cdk-integration-tests --test regtest test_regtest_mint_melt_round_trip -- --nocapture
 
 # # Run cargo test with the http_subscription feature
 # cargo test -p cdk-integration-tests --test regtest --features http_subscription test_regtest_mint_melt_round_trip
