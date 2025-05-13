@@ -233,6 +233,8 @@ impl MultiMintWallet {
         encoded_token: &str,
         p2pk_signing_keys: &[SecretKey],
         preimages: &[String],
+        // A serialized .json STWO proof
+        cairo_proof: Option<String>,
     ) -> Result<Amount, Error> {
         let token_data = Token::from_str(encoded_token)?;
         let unit = token_data.unit().unwrap_or_default();
@@ -258,7 +260,13 @@ impl MultiMintWallet {
             .ok_or(Error::UnknownWallet(wallet_key.clone()))?;
 
         match wallet
-            .receive_proofs(proofs, SplitTarget::default(), p2pk_signing_keys, preimages)
+            .receive_proofs(
+                proofs,
+                SplitTarget::default(),
+                p2pk_signing_keys,
+                preimages,
+                cairo_proof,
+            )
             .await
         {
             Ok(amount) => {

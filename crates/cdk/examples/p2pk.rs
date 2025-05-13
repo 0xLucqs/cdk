@@ -67,7 +67,13 @@ async fn main() -> Result<(), Error> {
     println!("{}", token);
 
     let amount = wallet
-        .receive(&token.to_string(), SplitTarget::default(), &[secret], &[])
+        .receive(
+            &token.to_string(),
+            SplitTarget::default(),
+            &[secret],
+            &[],
+            None,
+        )
         .await
         .unwrap();
 

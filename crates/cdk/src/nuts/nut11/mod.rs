@@ -14,6 +14,7 @@ use bitcoin::secp256k1::schnorr::Signature;
 use serde::de::Error as DeserializerError;
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use starknet_types_core::felt::Felt;
 use thiserror::Error;
 
 use super::nut00::Witness;
@@ -21,6 +22,7 @@ use super::nut01::PublicKey;
 #[cfg(feature = "mint")]
 use super::Proofs;
 use super::{Kind, Nut10Secret, Proof, SecretKey};
+use crate::cairo_sc::CairoConditions;
 use crate::nuts::nut00::BlindedMessage;
 use crate::secret::Secret;
 use crate::util::{hex, unix_time};
@@ -281,9 +283,28 @@ pub enum SpendingConditions {
         /// Additional Optional Spending [`Conditions`]
         conditions: Option<Conditions>,
     },
+    /// Cairo spending conditions
+    Cairo {
+        /// Program hash
+        data: Felt,
+        /// The additional condition to be verified by the mint
+        conditions: Option<CairoConditions>,
+    },
 }
 
+// The slicing of the code between the different files is a mess.
+// We are supposed to be in nut11 p2pk and we have nut14 code, + now cairo code.
+// Bad abstraction, bad code design.
+// Maybe it just needs to move things around a little bit.
+
 impl SpendingConditions {
+    /// New Cairo (SpendingConditions)
+    pub fn new_cairo(program_hash: Felt, output: Vec<Felt>) -> Result<Self, Error> {
+        Ok(Self::Cairo {
+            data: program_hash,
+            conditions: Some(CairoConditions { output }),
+        })
+    }
     /// New HTLC [SpendingConditions]
     pub fn new_htlc(preimage: String, conditions: Option<Conditions>) -> Result<Self, Error> {
         let htlc = Sha256Hash::hash(&hex::decode(preimage)?);
@@ -307,6 +328,7 @@ impl SpendingConditions {
         match self {
             Self::P2PKConditions { .. } => Kind::P2PK,
             Self::HTLCConditions { .. } => Kind::HTLC,
+            Self::Cairo { .. } => Kind::Cairo,
         }
     }
 
@@ -315,6 +337,7 @@ impl SpendingConditions {
         match self {
             Self::P2PKConditions { conditions, .. } => conditions.as_ref().and_then(|c| c.num_sigs),
             Self::HTLCConditions { conditions, .. } => conditions.as_ref().and_then(|c| c.num_sigs),
+            _ => None,
         }
     }
 
@@ -330,6 +353,7 @@ impl SpendingConditions {
                 Some(pubkeys)
             }
             Self::HTLCConditions { conditions, .. } => conditions.clone().and_then(|c| c.pubkeys),
+            _ => None,
         }
     }
 
@@ -338,6 +362,7 @@ impl SpendingConditions {
         match self {
             Self::P2PKConditions { conditions, .. } => conditions.as_ref().and_then(|c| c.locktime),
             Self::HTLCConditions { conditions, .. } => conditions.as_ref().and_then(|c| c.locktime),
+            _ => None,
         }
     }
 
@@ -350,6 +375,7 @@ impl SpendingConditions {
             Self::HTLCConditions { conditions, .. } => {
                 conditions.clone().and_then(|c| c.refund_keys)
             }
+            _ => None,
         }
     }
 }
@@ -376,6 +402,10 @@ impl TryFrom<Nut10Secret> for SpendingConditions {
                     .map_err(|_| Error::InvalidHash)?,
                 conditions: secret.secret_data.tags.and_then(|t| t.try_into().ok()),
             }),
+            Kind::Cairo => Ok(Self::Cairo {
+                data: Felt::from_str(&secret.secret_data.data).map_err(|_| Error::InvalidHash)?,
+                conditions: secret.secret_data.tags.and_then(|t| t.try_into().ok()),
+            }),
         }
     }
 }
@@ -388,6 +418,9 @@ impl From<SpendingConditions> for super::nut10::Secret {
             }
             SpendingConditions::HTLCConditions { data, conditions } => {
                 super::nut10::Secret::new(Kind::HTLC, data.to_string(), conditions)
+            }
+            SpendingConditions::Cairo { data, conditions } => {
+                super::nut10::Secret::new(Kind::Cairo, data.to_string(), conditions)
             }
         }
     }
@@ -477,7 +510,7 @@ impl TryFrom<Vec<Vec<String>>> for Conditions {
     fn try_from(tags: Vec<Vec<String>>) -> Result<Conditions, Self::Error> {
         let tags: HashMap<TagKind, Tag> = tags
             .into_iter()
-            .map(|t| Tag::try_from(t).unwrap())
+            .filter_map(|t| Tag::try_from(t).ok())
             .map(|t| (t.kind(), t))
             .collect();
 

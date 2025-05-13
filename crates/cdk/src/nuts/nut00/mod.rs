@@ -14,6 +14,7 @@ use thiserror::Error;
 use super::nut10;
 use super::nut11::SpendingConditions;
 use crate::amount::SplitTarget;
+use crate::cairo_sc::CairoWitness;
 use crate::dhke::{blind_message, hash_to_curve};
 use crate::nuts::nut01::{PublicKey, SecretKey};
 use crate::nuts::nut11::{serde_p2pk_witness, P2PKWitness};
@@ -189,6 +190,7 @@ pub enum Witness {
     /// HTLC Witness
     #[serde(with = "serde_htlc_witness")]
     HTLCWitness(HTLCWitness),
+    Cairo(CairoWitness),
 }
 
 impl Witness {
@@ -203,6 +205,12 @@ impl Witness {
                     sigs
                 });
             }
+            _ => {
+                // Do nothing. This method only exists because all the previous forms of spending conditions involved signatures
+                // It is not the case for cairo proofs. I would say that this is an abstractions that doesn't match the needs anymore,
+                // and will have to be removed, or re abstracted somewhere else.
+                // Same for `signatures` and `preimage` below
+            }
         }
     }
 
@@ -211,6 +219,7 @@ impl Witness {
         match self {
             Self::P2PKWitness(witness) => Some(witness.signatures.clone()),
             Self::HTLCWitness(witness) => witness.signatures.clone(),
+            _ => None,
         }
     }
 
@@ -219,6 +228,7 @@ impl Witness {
         match self {
             Self::P2PKWitness(_witness) => None,
             Self::HTLCWitness(witness) => Some(witness.preimage.clone()),
+            _ => None,
         }
     }
 }

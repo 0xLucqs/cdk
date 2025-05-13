@@ -1,6 +1,8 @@
 [workspace]
+# btw I ran rm -rf on the whole `crates/cdk-rexie` because it was causing compilations errors after my changes
+# It is supposed to be the crate for in-browser wallet. I didn't need it for the demo.
 members = [
-    "crates/*",
+    "crates/*", "spending_conditions/cashu-nonce-signer",
 ]
 resolver = "2"
 

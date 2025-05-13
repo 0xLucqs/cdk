@@ -10,6 +10,7 @@ use cdk::wallet::types::SendKind;
 use cdk::wallet::MultiMintWallet;
 use cdk::Amount;
 use clap::Args;
+use starknet_types_core::felt::Felt;
 
 use crate::sub_commands::balance::mint_balances;
 
@@ -48,6 +49,11 @@ pub struct SendSubCommand {
     /// Currency unit e.g. sat
     #[arg(default_value = "sat")]
     unit: String,
+    #[arg(short, long, num_args = 2.., value_delimiter = ' ')]
+    /// Expextations specified by the sender
+    ///
+    /// Vec[Program hash, output_len, outputs]
+    cairo: Option<Vec<String>>,
 }
 
 pub async fn send(
@@ -82,64 +88,52 @@ pub async fn send(
         bail!("Not enough funds");
     }
 
-    let conditions = match &sub_command_args.preimage {
-        Some(preimage) => {
-            let pubkeys = match sub_command_args.pubkey.is_empty() {
-                true => None,
-                false => Some(
-                    sub_command_args
-                        .pubkey
-                        .iter()
-                        .map(|p| PublicKey::from_str(p).unwrap())
-                        .collect(),
-                ),
-            };
-
-            let refund_keys = match sub_command_args.refund_keys.is_empty() {
-                true => None,
-                false => Some(
-                    sub_command_args
-                        .refund_keys
-                        .iter()
-                        .map(|p| PublicKey::from_str(p).unwrap())
-                        .collect(),
-                ),
-            };
-
-            let conditions = Conditions::new(
-                sub_command_args.locktime,
-                pubkeys,
-                refund_keys,
-                sub_command_args.required_sigs,
-                None,
-            )
-            .unwrap();
-
-            Some(SpendingConditions::new_htlc(
-                preimage.clone(),
-                Some(conditions),
-            )?)
+    // We short circuit the regular cashu flow
+    // It's a bit arbitrary but it works for the needs of the demo
+    let mut conditions = if let Some(cairo_inputs) = &sub_command_args.cairo {
+        let program_hash = Felt::from_str(&cairo_inputs[0])?;
+        let output_len = cairo_inputs
+            .get(1)
+            .map(|v| str::parse::<usize>(v))
+            .transpose()?
+            .unwrap_or_default();
+        let mut output = Vec::with_capacity(output_len);
+        for i in 0..output_len {
+            output.push(Felt::from_str(&cairo_inputs[i])?);
         }
-        None => match sub_command_args.pubkey.is_empty() {
-            true => None,
-            false => {
-                let pubkeys: Vec<PublicKey> = sub_command_args
-                    .pubkey
-                    .iter()
-                    .map(|p| PublicKey::from_str(p).unwrap())
-                    .collect();
 
-                let refund_keys: Vec<PublicKey> = sub_command_args
-                    .refund_keys
-                    .iter()
-                    .map(|p| PublicKey::from_str(p).unwrap())
-                    .collect();
+        Some(SpendingConditions::new_cairo(program_hash, output)?)
+    } else {
+        None
+    };
 
-                let refund_keys = (!refund_keys.is_empty()).then_some(refund_keys);
+    // Here is the normal code for pay-to-public-key and other spending conditions
+    // It is skipped if we already have a cairo spending condition
+    // TODO: either make them exclusive to each other, or just get rid of the others altogether.
+    if conditions.is_none() {
+        conditions = match &sub_command_args.preimage {
+            Some(preimage) => {
+                let pubkeys = match sub_command_args.pubkey.is_empty() {
+                    true => None,
+                    false => Some(
+                        sub_command_args
+                            .pubkey
+                            .iter()
+                            .map(|p| PublicKey::from_str(p).unwrap())
+                            .collect(),
+                    ),
+                };
 
-                let data_pubkey = pubkeys[0];
-                let pubkeys = pubkeys[1..].to_vec();
-                let pubkeys = (!pubkeys.is_empty()).then_some(pubkeys);
+                let refund_keys = match sub_command_args.refund_keys.is_empty() {
+                    true => None,
+                    false => Some(
+                        sub_command_args
+                            .refund_keys
+                            .iter()
+                            .map(|p| PublicKey::from_str(p).unwrap())
+                            .collect(),
+                    ),
+                };
 
                 let conditions = Conditions::new(
                     sub_command_args.locktime,
@@ -150,13 +144,49 @@ pub async fn send(
                 )
                 .unwrap();
 
-                Some(SpendingConditions::P2PKConditions {
-                    data: data_pubkey,
-                    conditions: Some(conditions),
-                })
+                Some(SpendingConditions::new_htlc(
+                    preimage.clone(),
+                    Some(conditions),
+                )?)
             }
-        },
-    };
+            None => match sub_command_args.pubkey.is_empty() {
+                true => None,
+                false => {
+                    let pubkeys: Vec<PublicKey> = sub_command_args
+                        .pubkey
+                        .iter()
+                        .map(|p| PublicKey::from_str(p).unwrap())
+                        .collect();
+
+                    let refund_keys: Vec<PublicKey> = sub_command_args
+                        .refund_keys
+                        .iter()
+                        .map(|p| PublicKey::from_str(p).unwrap())
+                        .collect();
+
+                    let refund_keys = (!refund_keys.is_empty()).then_some(refund_keys);
+
+                    let data_pubkey = pubkeys[0];
+                    let pubkeys = pubkeys[1..].to_vec();
+                    let pubkeys = (!pubkeys.is_empty()).then_some(pubkeys);
+
+                    let conditions = Conditions::new(
+                        sub_command_args.locktime,
+                        pubkeys,
+                        refund_keys,
+                        sub_command_args.required_sigs,
+                        None,
+                    )
+                    .unwrap();
+
+                    Some(SpendingConditions::P2PKConditions {
+                        data: data_pubkey,
+                        conditions: Some(conditions),
+                    })
+                }
+            },
+        };
+    }
 
     let wallet = mints_amounts[mint_number].0.clone();
     let wallet = multi_mint_wallet
